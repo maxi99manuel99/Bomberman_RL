@@ -14,9 +14,9 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 20  # keep only ... last transitions
+TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
 GAMMA = 0.6 # discount factor
-BATCH_SIZE = 10 # subset of the transitions used for gradient update
+BATCH_SIZE = 1000 # subset of the transitions used for gradient update
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
 # Events
@@ -108,6 +108,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     #and improve weight vector by gradient update
     for i, action in enumerate(ACTIONS):
         subbatch = batch[np.where(batch[:,1] == action)]
+        #print(len(subbatch))
         #if an action is not present in our current batch we can not update it
         if len(subbatch) != 0:
             gradient_update(self, subbatch, i)
@@ -126,9 +127,9 @@ def reward_from_events(self, events: List[str]) -> int:
 
     game_rewards = {
         e.INVALID_ACTION: -10,
-        e.KILLED_SELF: -50,
-        e.COIN_COLLECTED: 5,
-        'TOWARDS_COIN': 100, 
+        e.KILLED_SELF: -2000,
+        e.COIN_COLLECTED: 200,
+        'TOWARDS_COIN': 10, 
         'NO_COIN': -2
     }
     reward_sum = 0
@@ -150,7 +151,7 @@ def gradient_update(self, subbatch: List[Transition], action_index: int):
     """
 
     #gradient update hyperparameter
-    alpha = 0.4
+    alpha = 0.1
 
     #sum in the gradient update formula
     sum = 0
@@ -178,7 +179,7 @@ def append_custom_events(old_game_state: dict, new_game_state: dict, events: Lis
     """
     _, _, _, old_pos = old_game_state['self']
     _, _, _, new_pos =  new_game_state['self']
-    best_dist_old = best_dist = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
+    best_dist_old = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
     best_dist_new = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
 
     #check if we got closer to a coin
