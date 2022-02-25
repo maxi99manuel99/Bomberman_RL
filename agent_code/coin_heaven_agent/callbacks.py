@@ -33,7 +33,7 @@ def setup(self):
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
-            self.model = pickle.load(file)
+            self.weights = pickle.load(file)
 
 
 def act(self, game_state: dict) -> str:
@@ -46,15 +46,19 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     # todo Exploration vs exploitation
-    random_prob = .1
+    random_prob = .2
     
-    '''if self.train and random.random() < random_prob:
+    if self.train and random.random() < random_prob:
         self.logger.debug("Choosing action purely at random.")
-        80%: walk in any direction. 10% wait. 10% bomb.
-        return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])'''
+        #80%: walk in any direction. 10% wait. 10% bomb.
+        return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
+    
+    #approximate Q by linear regression
+    Q = np.matmul(state_to_features(game_state), self.weights.T)
+    action_idx = np.argmax(Q)
 
     #self.logger.debug("Querying model for action.")
-    return "LEFT"
+    return ACTIONS[action_idx]
 
 
 def state_to_features(game_state: dict) -> np.array:
@@ -79,14 +83,14 @@ def state_to_features(game_state: dict) -> np.array:
     features = np.zeros(D)
 
     
-    field = game_state['field']
-    coins = game_state['coins']
+    field = np.array(game_state['field'])
+    coins = np.array(game_state['coins'])
     _, _, _, (x, y) = game_state['self']
 
     #we will normalize all features to [0,1]
     
     #our first 4 features are gonna be, what field type is around us
-    features[0:4] = ([field[x+1, y], field[x-1, y], field[x, y+1], field[x, y-1]] +1) / 2
+    features[0:4] = (np.array([field[x+1, y], field[x-1, y], field[x, y+1], field[x, y-1]]) +1) / 2
 
     #as a next feature we take our own position
     features[4] = (y * s.WIDTH + x) / (s.WIDTH * s.HEIGHT)
@@ -95,8 +99,10 @@ def state_to_features(game_state: dict) -> np.array:
     features[5] = game_state['step'] / s.MAX_STEPS
 
     #our last feature is gonna be the direction to the nearest coin (connection vec)
-    connection_vec = (coins - (x, y)).min()
-    features[6] = (connection_vec[1] * (s.WIDTH-1) + connection_vec[0]) / ((s.WIDTH-1) * (s.HEIGHT-1))
+    connection_vec = (coins - np.array([x, y]))
+    shortest_vec_indx = np.argmin(np.linalg.norm(connection_vec, axis=1))
+
+    features[6] = (connection_vec[shortest_vec_indx][1] * (s.WIDTH-1) + connection_vec[shortest_vec_indx][0]) / ((s.WIDTH-1) * (s.HEIGHT-1))
 
     return features
 

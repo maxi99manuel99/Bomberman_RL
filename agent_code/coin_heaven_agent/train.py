@@ -32,6 +32,9 @@ def setup_training(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
 
+    #save total rewards for each game
+    self.total_rewards = 0
+
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
@@ -56,11 +59,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
+    #In the first game state our agent can not achieve anything so we ingore it
+    if old_game_state == None:
+        return
+
     #Append custom events for rewards
     total_events = append_custom_events(old_game_state, new_game_state, events)
 
     #calculate total reward for this timestep
     step_rewards = reward_from_events(self, total_events)
+    self.total_rewards = self.total_rewards + step_rewards
 
     # state_to_features is defined in callbacks.py
     # fill experience buffer with transitions
@@ -85,21 +93,28 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     #calculate total reward for this timestep
     step_rewards = reward_from_events(self, events)
 
-    #append last transition
+    #append last transition (does not work for temporal difference since we needa next step)
     self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, step_rewards))
 
+    #reset total rewards per game back to 0
+    print(self.total_rewards)
+    self.total_rewards = 0
+
     #random subbatch of TS for gradient update
-    batch = np.random.choice(self.transitions, BATCH_SIZE, replace=False)
+    indices = np.random.choice(np.arange(len(self.transitions), dtype=int), min(len(self.transitions), BATCH_SIZE), replace=False)
+    batch = np.array(self.transitions, dtype=Transition)[indices]
 
     #create subbatch for every action
     #and improve weight vector by gradient update
     for i, action in enumerate(ACTIONS):
-        subbatch = batch[np.where(batch[:,'action'] == action)]
-        gradient_update(self, subbatch, i)
+        subbatch = batch[np.where(batch[:,1] == action)]
+        #if an action is not present in our current batch we can not update it
+        if len(subbatch) != 0:
+            gradient_update(self, subbatch, i)
 
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.model, file)
+        pickle.dump(self.weights, file)
 
 def reward_from_events(self, events: List[str]) -> int:
     """
@@ -108,11 +123,13 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get so as to en/discourage
     certain behavior.
     """
+
     game_rewards = {
         e.INVALID_ACTION: -10,
+        e.KILLED_SELF: -50,
         e.COIN_COLLECTED: 5,
-        'TOWARDS_COIN': 1,
-        'NO_COIN': -2  
+        'TOWARDS_COIN': 100, 
+        'NO_COIN': -2
     }
     reward_sum = 0
     for event in events:
@@ -139,8 +156,10 @@ def gradient_update(self, subbatch: List[Transition], action_index: int):
     sum = 0
     for transition in subbatch:
         #temporal difference
-        y = transition['reward'] + GAMMA * np.matmul(transition['next_state'], self.weights).max()
-        sum = sum + transition['state'] * (y - transition['state'].dot(self.weights[action_index]))
+        y = transition[3]
+        if transition[2] is not None:
+            y = y + GAMMA * np.matmul(transition[2], self.weights.T).max()
+        sum = sum + transition[0] * (y - transition[0].dot(self.weights[action_index]))
     
     self.weights[action_index] = self.weights[action_index] + (alpha / len(subbatch)) * sum
 
@@ -167,7 +186,7 @@ def append_custom_events(old_game_state: dict, new_game_state: dict, events: Lis
         events.append("TOWARDS_COIN")
 
     #every time step we do not collect a coin
-    if e.COIN_COLLEDCTED not in events:
+    if e.COIN_COLLECTED not in events:
         events.append("NO_COIN")
 
     return events
