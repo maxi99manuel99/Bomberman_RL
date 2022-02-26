@@ -25,8 +25,9 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 9
+    self.D = 13
     self.num_actions = 6
+    self.previous_move = np.array([0,0,0,0])
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
@@ -55,17 +56,29 @@ def act(self, game_state: dict) -> str:
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
     
+    
     #approximate Q by linear regression
-    Q = np.matmul(state_to_features(game_state), self.weights.T)
+    Q = np.matmul(state_to_features(self,game_state), self.weights.T)
 
+    #our policy is the argmax of the approximated Q-function
     action_idx = np.argmax(Q)
 
-
     #self.logger.debug("Querying model for action.")
+
+    #Update the previous move(We use it for the features)
+    if action_idx == 0:
+        self.previous_move = np.array([0,0,1,0])
+    elif action_idx == 1:
+        self.previous_move = np.array([0,1,0,0])
+    elif action_idx == 2:
+        self.previous_move = np.array([0,0,0,1])
+    elif action_idx == 3:
+        self.previous_move = np.array([1,0,0,0])
+
     return ACTIONS[action_idx]
 
 
-def state_to_features(game_state: dict) -> np.array:
+def state_to_features(self, game_state: dict) -> np.array:
     """
     *This is not a required function, but an idea to structure your code.*
 
@@ -83,34 +96,26 @@ def state_to_features(game_state: dict) -> np.array:
     if game_state is None:
         return None
     
-    D = 9
+    D = 13
     features = np.zeros(D)
 
-    
     field = np.array(game_state['field'])
     coins = np.array(game_state['coins'])
     _, _, _, (x, y) = game_state['self']
 
-    #print(f"{x} {y}")
-
     #we will normalize all features to [0,1]
-    
     #our first 4 features are gonna be, what field type is around us
     features[0:4] = (np.array([field[y,x+1], field[y,x-1], field[y+1,x], field[y-1,x]]) +1) / 2
-
-    #as a next feature we take our own position
-    #features[4] = (y * s.WIDTH + x) / (s.WIDTH*s.HEIGHT)
 
     #the next feature is gonna be the timestep we are currently in
     features[4] = game_state['step'] / s.MAX_STEPS
 
-    #our last feature is gonna be the direction to the nearest coin (connection vec)
-    #connection_vec = (coins - np.array([x, y]))
-    #shortest_vec_indx = np.argmin(np.linalg.norm(connection_vec, axis=1))
+    if len(coins) != 0:
+        features[5:9] = breath_first_search(field.copy(), np.array([x,y]), coins)
+    else:
+        features[5:9] = np.array([0,0,0,0])
 
-    #features[6] = (connection_vec[shortest_vec_indx][1] * s.WIDTH + connection_vec[shortest_vec_indx][0]) / (s.WIDTH*s.HEIGHT-1)
-
-    features[5:9] = breath_first_search(field, np.array([x,y]), coins)
+    features[9:13] = self.previous_move
 
     return features
 
@@ -123,36 +128,26 @@ def state_to_features(game_state: dict) -> np.array:
     return stacked_channels.reshape(-1)'''
 
 #perform a breadth first sreach to get the direction to nearest coin
-def breath_first_search(field, starting_point, coins):
+def breath_first_search(field: np.array, starting_point: np.array, coins:np.array)->np.array: 
     """
     :param: field: Describes the current game board. 0 stays for free tile, 1 for stone walls and -1 for crates
             starting_point: The current position of the player. The position is a 1 dimensional value and the flattend version of the 2D field
     :return: np.array
     """
-    
-    #print("Original field")
-    #print(field)
-    
+
     #update the field so that the coins are included
     for coin in coins:
         field[coin[1],coin[0]] = 2
-        
-    #print("Field combined with coins")
-    #print(field)
     
     #Use this list to get backtrace the path from the nearest coin to the players position to get the direction
     parent = np.ones(s.WIDTH*s.HEIGHT) * -1
     
-    #print("Size of parents list")
-    #print(parent.shape)
 
     #Queue for visiting the tiles. 
     start = starting_point[1] * s.WIDTH + starting_point[0]
     parent[start] = start
-    
-    #print("Start tile")
-    #print(start)
-    
+
+    #check if the player is already in a coin field
     if field[starting_point[1],starting_point[0]] == 2:
         return np.array([0,0,0,0])
     
@@ -160,19 +155,15 @@ def breath_first_search(field, starting_point, coins):
     counter = 0
     
     coin_reached = False
-
     target = None
 
     #Visit tiles until a tile contains a coin
     while not coin_reached:
         current_position = path_queue[counter]
         
-        #print(f"Current Position: {current_position}")
-
+        #get the 2D coordinates
         x = current_position % s.WIDTH
         y = current_position // s.WIDTH
-        
-        #print(f"2D coordinate: {y} , {x}")
         
         #check if we reached a coin
         if field[y, x] == 2:
@@ -201,29 +192,25 @@ def breath_first_search(field, starting_point, coins):
                 path_queue = np.append(path_queue,current_position+ s.WIDTH)
                 parent[current_position+ s.WIDTH] = current_position
                 
-        #print("Parent:")
-        #print(parent.reshape(9,9))
-        
+        #increase counter to get the next tile from the queue
         counter = counter + 1
     
-    #print("Get Path")
-    #get the path from the nearest coin to the player
+    #get the path from the nearest coin to the player by accessing the parent list
     path = [target]
     tile = target
     
-    #print(tile)
     while tile != start:
         tile = int(parent[tile])
         path.append(tile)
-        #print(path)
 
     path = np.flip(path)
 
-    #print(path)
+    #get the second tile of the path which indicates the direction to the nearest coin
     next_position = path[1]
     next_position_x = path[1] % s.WIDTH
     next_position_y = path[1] // s.WIDTH
 
+    #use one-hot-encoding: [LEFT, RIGHT, UP, DOWN]
     direction = [int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])]
     
     return direction

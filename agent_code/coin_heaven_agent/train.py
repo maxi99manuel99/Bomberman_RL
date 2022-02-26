@@ -8,20 +8,23 @@ import events as e
 from .callbacks import state_to_features
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
+ACTION_TO_INT = {'UP':0, 'RIGHT' : 1 , 'DOWN': 2, 'LEFT': 3, 'WAIT':4, 'BOMB': 5}
 
 # This is only an example!
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- DO modify
+GAMMA = 0.75 # discount factor
+
 TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
-GAMMA = 0.6 # discount factor
-BATCH_SIZE = 1000 # subset of the transitions used for gradient update
+BATCH_SIZE = 500 # subset of the transitions used for gradient update
+BATCH_PRIORITY_SIZE = 100 #sample the batch with the biggest squared loss
+
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
-
 
 def setup_training(self):
     """
@@ -34,6 +37,7 @@ def setup_training(self):
 
     #save total rewards for each game
     self.total_rewards = 0
+    #self.previous_move = None
 
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
@@ -64,7 +68,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         return
 
     #Append custom events for rewards
-    total_events = append_custom_events(old_game_state, new_game_state, events)
+    total_events = append_custom_events(self, old_game_state, new_game_state, events)
+
+    #self.previous_move = self_action
 
     #calculate total reward for this timestep
     step_rewards = reward_from_events(self, total_events)
@@ -72,8 +78,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     # state_to_features is defined in callbacks.py
     # fill experience buffer with transitions
-    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), step_rewards))
-
+    self.transitions.append(Transition(state_to_features(self,old_game_state), self_action, state_to_features(self,new_game_state), step_rewards))
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """
@@ -94,25 +99,51 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     step_rewards = reward_from_events(self, events)
 
     #append last transition (does not work for temporal difference since we needa next step)
-    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, step_rewards))
+    self.transitions.append(Transition(state_to_features(self,last_game_state), last_action, None, step_rewards))
 
     #reset total rewards per game back to 0
     print(self.total_rewards)
     self.total_rewards = 0
 
-    #random subbatch of TS for gradient update
+    """
+    SAMPLE A BATCH FROM THE EXPERIENCE BUFFER AND USE IT TO IMPROVIZE THE WEIGHT VECTORS
+    """
+
+    #random subset of experience buffer
     indices = np.random.choice(np.arange(len(self.transitions), dtype=int), min(len(self.transitions), BATCH_SIZE), replace=False)
     batch = np.array(self.transitions, dtype=Transition)[indices]
 
-    #create subbatch for every action
-    #and improve weight vector by gradient update
-    for i, action in enumerate(ACTIONS):
-        subbatch = batch[np.where(batch[:,1] == action)]
-        #print(len(subbatch))
-        #if an action is not present in our current batch we can not update it
-        if len(subbatch) != 0:
-            gradient_update(self, subbatch, i)
+    #save a list of the squared losses
+    squared_loss = np.zeros(min(len(self.transitions), BATCH_SIZE))
+    
+    priority_size = min(len(self.transitions), BATCH_PRIORITY_SIZE)
 
+    #calculate the squared loss for each training instance
+    for i,transition in enumerate(batch):
+        #temporal difference
+        y = temporal_difference(self, transition[3], transition[2])
+
+        #other methods
+        ...
+
+        squared_loss[i] = np.square( y - transition[0].dot(self.weights[ACTION_TO_INT[transition[1]]]) )
+        
+    #sort the squarred loss list 
+    best_indices = np.argpartition(squared_loss, -priority_size)[-priority_size:]
+
+    #now get the prioritized batch
+    batch_priority = batch[best_indices]
+
+    #create subbatch for every action and improve weight vector by gradient update
+    for i, action in enumerate(ACTIONS):
+        subbatch = batch_priority[np.where(batch_priority[:,1] == action)]
+
+        #If an action is not present in our current batch we can not update it. Also, we send the number of rounds to the function to decrease 
+        #the learning rate.
+        if len(subbatch) != 0:
+            gradient_update(self, subbatch, i, last_game_state["round"])
+
+    
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.weights, file)
@@ -128,9 +159,11 @@ def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
         e.INVALID_ACTION: -10,
         e.KILLED_SELF: -2000,
-        e.COIN_COLLECTED: 200,
+        e.COIN_COLLECTED: 500,
         'TOWARDS_COIN': 10, 
-        'NO_COIN': -2
+        'NO_COIN': -2,
+        'ALL_COINS': 2500,
+        #'SAME_MOVE': 20
     }
     reward_sum = 0
     for event in events:
@@ -139,32 +172,7 @@ def reward_from_events(self, events: List[str]) -> int:
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
 
-
-def gradient_update(self, subbatch: List[Transition], action_index: int):
-    """
-    improve weight vector
-
-    Args:
-        subbatch (List[Transition]): the subbatch for the current action
-        action_index: int: The index of the action used to update the correct
-        position in the weight vector
-    """
-
-    #gradient update hyperparameter
-    alpha = 0.1
-
-    #sum in the gradient update formula
-    sum = 0
-    for transition in subbatch:
-        #temporal difference
-        y = transition[3]
-        if transition[2] is not None:
-            y = y + GAMMA * np.matmul(transition[2], self.weights.T).max()
-        sum = sum + transition[0] * (y - transition[0].dot(self.weights[action_index]))
-    
-    self.weights[action_index] = self.weights[action_index] + (alpha / len(subbatch)) * sum
-
-def append_custom_events(old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
+def append_custom_events(self,old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
     """
     Appends all our custom events to the events list
     so we can calculate the total rewards out of these
@@ -179,17 +187,66 @@ def append_custom_events(old_game_state: dict, new_game_state: dict, events: Lis
     """
     _, _, _, old_pos = old_game_state['self']
     _, _, _, new_pos =  new_game_state['self']
-    best_dist_old = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
-    best_dist_new = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
+    
+    if len(new_game_state['coins']) != 0:
+        best_dist_old = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
+        best_dist_new = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
 
-    #check if we got closer to a coin
-    if(best_dist_new < best_dist_old):
-        events.append("TOWARDS_COIN")
+        #check if we got closer to a coin
+        if(best_dist_new < best_dist_old):
+            events.append("TOWARDS_COIN")
 
-    #every time step we do not collect a coin
-    if e.COIN_COLLECTED not in events:
-        events.append("NO_COIN")
+        #every time step we do not collect a coin
+        if e.COIN_COLLECTED not in events:
+            events.append("NO_COIN")
+    else:
+        events.append("ALL_COINS")
+
+    if self.previous_move[0] == 1 and e.MOVED_UP in events:
+        events.append("SAME_MOVE")
+    elif self.previous_move[1] == 1 and e.MOVED_RIGHT in events:
+        events.append("SAME_MOVE")
+    elif self.previous_move[2] == 1 and e.MOVED_DOWN in events:
+        events.append("SAME_MOVE")
+    elif self.previous_move[3] == 1 and e.MOVED_LEFT in events:
+        events.append("SAME_MOVE")
 
     return events
     
+#Gradient update to improvize the weight vectors
+def gradient_update(self, subbatch: List[Transition], action_index: int, round: int):
+    """
+    improve weight vector
 
+    Args:
+        subbatch (List[Transition]): the subbatch for the current action
+        action_index: int: The index of the action used to update the correct
+        position in the weight vector
+    """
+
+    #gradient update hyperparameter
+    alpha = 0.8
+
+    #sum in the gradient update formula
+    sum = 0
+    for transition in subbatch:
+        #temporal difference
+        y = temporal_difference(self, transition[3], transition[2])
+
+        #other Methods
+        #...
+        
+        sum = sum + transition[0] * (y - transition[0].dot(self.weights[action_index]))
+    
+    self.weights[action_index] = self.weights[action_index] + (alpha / (len(subbatch) * round)) * sum
+
+
+#Methods for the current guess of the Q-function
+
+#TD
+def temporal_difference(self, reward, next_state):
+    y = reward
+    if next_state is not None:
+        y = y + GAMMA * np.matmul(next_state, self.weights.T).max()
+
+    return y
