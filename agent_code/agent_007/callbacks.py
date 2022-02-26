@@ -24,7 +24,7 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 25
+    self.D = 26
     self.num_actions = 6
     self.previous_move = np.array([0,0,0,0])
 
@@ -50,6 +50,9 @@ def act(self, game_state: dict) -> str:
     # todo Exploration vs exploitation
     random_prob = .1
     
+    #if game_state['round'] <= 10:
+    #    random_prob = 0.4
+
     if self.train and random.random() < random_prob:
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
@@ -74,6 +77,7 @@ def act(self, game_state: dict) -> str:
     elif action_idx == 3:
         self.previous_move = np.array([1,0,0,0])
 
+    print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
 
 
@@ -101,7 +105,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     coins = np.array(game_state['coins'])
     bombs = game_state['bombs']
     explosion_map = np.array(game_state['explosion_map'])
-    _, _, _, (x, y) = game_state['self']
+    _, _, bomb, (x, y) = game_state['self']
 
     #we will normalize all features to [0,1]
     #our first 4 features are gonna be, what field type is around us
@@ -119,18 +123,26 @@ def state_to_features(self, game_state: dict) -> np.array:
     features[9:13] = self.previous_move
 
     #the next feature is gonna be the direction we need to move to get to the next crate the fastest
-    crate_indices = np.where(field == 1)[0]
-    if len(crate_indices) != 0:
+    crate_indices = np.array(np.where(field == 1))
+
+    """
+    if crate_indices.size != 0:
         features[13:17] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
     else:
         features[13:17] = np.array([0,0,0,0])
+    """
 
     #the next feature is gonna be the amount of bombs that are in a certain radius of the player
     # weighted by their distance and the time till they explode
-    features[17:21] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+    features[13:17] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
 
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[21:25] = (np.array([explosion_map[y,x+1], explosion_map[y,x-1], explosion_map[y+1,x], explosion_map[y-1,x]])) / s.EXPLOSION_TIMER
+    features[17:21] = (np.array([explosion_map[y,x+1], explosion_map[y,x-1], explosion_map[y+1,x], explosion_map[y-1,x]])) / s.EXPLOSION_TIMER
+
+    #the next feature will gonna show if a bomb action is possible
+    features[21] = int(bomb)
+
+    features[22:26] = np.array([ int(field[y,x-1]==1), int(field[y,x+1]==1), int(field[y-1,x]==1), int(field[y+1,x]==1)==1  ])
 
     return features
 
@@ -151,7 +163,7 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
     """
 
     #update the field so that the coins are included
-    print(targets)
+    #print(targets)
     for target in targets:
         field[target[1],target[0]] = 2
     

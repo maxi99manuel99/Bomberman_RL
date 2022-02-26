@@ -1,4 +1,5 @@
 from collections import namedtuple, deque
+from attr import field
 import numpy as np
 
 import pickle
@@ -154,19 +155,21 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        e.INVALID_ACTION: -10,
+        e.INVALID_ACTION: -500,
         e.KILLED_SELF: -2000,
         e.COIN_COLLECTED: 500,
-        e.COIN_FOUND: 200,
-        e.CRATE_DESTROYED: 120,
-        #'BOMB_HIT_NOTHING': -30,
+        e.COIN_FOUND: 500,
+        e.CRATE_DESTROYED: 500,
+        'BOMB_HIT_NOTHING': -300,
         'TOWARDS_COIN': 10, 
         'NO_COIN': -2,
         'ALL_COINS': 2500,
+        'BOMB_NEXT_TO_CRATE': 300
     }
     reward_sum = 0
     for event in events:
         if event in game_rewards:
+            #print(event)
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
@@ -187,7 +190,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     _, _, _, old_pos = old_game_state['self']
     _, _, _, new_pos =  new_game_state['self']
     
-    if len(new_game_state['coins']) != 0:
+    if len(new_game_state['coins']) != 0 and len(old_game_state['coins']) != 0:
         best_dist_old = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
         best_dist_new = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
 
@@ -198,11 +201,18 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         #every time step we do not collect a coin
         if e.COIN_COLLECTED not in events:
             events.append("NO_COIN")
-    else:
+    elif np.array(np.where(np.array(new_game_state['field']) == 1)).size == 0:
         events.append("ALL_COINS")
 
     if e.BOMB_EXPLODED in events and e.CRATE_DESTROYED not in events and e.KILLED_OPPONENT not in events:
-        events.append("BOMB HIT NOTHING")
+        events.append("BOMB_HIT_NOTHING")
+
+    field = np.array(old_game_state['field'])
+
+    next_to_crate = field[old_pos[1],old_pos[0]-1] ==1 or field[old_pos[1],old_pos[0]+1] ==1 or field[old_pos[1]-1,old_pos[0]] == 1 or field[old_pos[1]+1,old_pos[0]] == 1
+
+    if e.BOMB_DROPPED in events and next_to_crate:
+        events.append("BOMB_NEXT_TO_CRATE")
 
     return events
     

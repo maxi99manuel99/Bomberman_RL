@@ -1,12 +1,1 @@
-2022-02-26 18:31:34,533 [agent_007_code] INFO: Loading model from saved state.
-2022-02-26 18:31:34,778 [agent_007_wrapper] ERROR: invalid index to scalar variable.
-Traceback (most recent call last):
-  File "/home/manuel/Final_Project/bomberman_rl/agents.py", line 248, in process_event
-    event_result = getattr(module, event_name)(self.fake_self, *event_args)
-  File "/home/manuel/Final_Project/bomberman_rl/agent_code/agent_007/callbacks.py", line 60, in act
-    Q = np.matmul(state_to_features(self,game_state), self.weights.T)
-  File "/home/manuel/Final_Project/bomberman_rl/agent_code/agent_007/callbacks.py", line 124, in state_to_features
-    features[13:17] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
-  File "/home/manuel/Final_Project/bomberman_rl/agent_code/agent_007/callbacks.py", line 156, in breath_first_search
-    field[target[1],target[0]] = 2
-IndexError: invalid index to scalar variable.
+2022-02-26 21:42:23,664 [agent_007_code] INFO: Loading model from saved state.
