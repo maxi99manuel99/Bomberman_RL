@@ -37,7 +37,6 @@ def setup_training(self):
 
     #save total rewards for each game
     self.total_rewards = 0
-    #self.previous_move = None
 
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
@@ -69,8 +68,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     #Append custom events for rewards
     total_events = append_custom_events(self, old_game_state, new_game_state, events)
-
-    #self.previous_move = self_action
 
     #calculate total reward for this timestep
     step_rewards = reward_from_events(self, total_events)
@@ -135,13 +132,13 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     batch_priority = batch[best_indices]
 
     #create subbatch for every action and improve weight vector by gradient update
-    for i, action in enumerate(ACTIONS):
+    for action in ACTIONS:
         subbatch = batch_priority[np.where(batch_priority[:,1] == action)]
 
         #If an action is not present in our current batch we can not update it. Also, we send the number of rounds to the function to decrease 
         #the learning rate.
         if len(subbatch) != 0:
-            gradient_update(self, subbatch, i, last_game_state["round"])
+            gradient_update(self, subbatch, ACTION_TO_INT[action], last_game_state["round"])
 
     
     # Store the model
@@ -160,10 +157,12 @@ def reward_from_events(self, events: List[str]) -> int:
         e.INVALID_ACTION: -10,
         e.KILLED_SELF: -2000,
         e.COIN_COLLECTED: 500,
+        e.COIN_FOUND: 200,
+        e.CRATE_DESTROYED: 120,
+        #'BOMB_HIT_NOTHING': -30,
         'TOWARDS_COIN': 10, 
         'NO_COIN': -2,
         'ALL_COINS': 2500,
-        #'SAME_MOVE': 20
     }
     reward_sum = 0
     for event in events:
@@ -202,14 +201,8 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     else:
         events.append("ALL_COINS")
 
-    if self.previous_move[0] == 1 and e.MOVED_UP in events:
-        events.append("SAME_MOVE")
-    elif self.previous_move[1] == 1 and e.MOVED_RIGHT in events:
-        events.append("SAME_MOVE")
-    elif self.previous_move[2] == 1 and e.MOVED_DOWN in events:
-        events.append("SAME_MOVE")
-    elif self.previous_move[3] == 1 and e.MOVED_LEFT in events:
-        events.append("SAME_MOVE")
+    if e.BOMB_EXPLODED in events and e.CRATE_DESTROYED not in events and e.KILLED_OPPONENT not in events:
+        events.append("BOMB HIT NOTHING")
 
     return events
     
