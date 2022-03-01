@@ -24,7 +24,7 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 12
+    self.D = 21
     self.num_actions = 6
     self.previous_move = np.array([0,0,0,0])
 
@@ -143,15 +143,18 @@ def state_to_features(self, game_state: dict) -> np.array:
 
     #the next feature is gonna be the amount of bombs that are in a certain radius of the player
     # weighted by their distance and the time till they explode
-    #features[13:17] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
-
+    features[12:16] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+    #print(features[12:16])
 
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    #features[17:21] = (np.array([explosion_map[y,x+1], explosion_map[y,x-1], explosion_map[y+1,x], explosion_map[y-1,x]])) / s.EXPLOSION_TIMER
+    features[16:20] = (np.array([explosion_map[x+1,y], explosion_map[x-1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
 
 
-    #the next feature will gonna show if a bomb action is possible
-    #features[21] = int(bomb)
+    #the next feature is gonna show if a bomb action is possible
+    features[20] = int(bomb)
+
+    #the next feature is if we are standing on a bomb
+    features[21] = int(len(np.array((np.where(bomb[:,0] == (x,y))))) == 0)
 
 
     return features
@@ -225,7 +228,7 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
                 parent[current_position- s.COLS] = current_position
  
             #down from the current position
-            if y < s.HEIGHT-1 and field[x,y+1] != -1 and parent[current_position+ s.COLS] == -1:
+            if y < s.ROWS-1 and field[x,y+1] != -1 and parent[current_position+ s.COLS] == -1:
                 path_queue = np.append(path_queue,current_position+ s.COLS)
                 parent[current_position+ s.COLS] = current_position
                 
@@ -314,7 +317,7 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
         
         else:
             #left from the current position. 
-            if current_position % s.COLS != 0 and field[x-1,y] != 1 and field[y,x-1]!= -1 and parent[current_position-1] == -1:
+            if current_position % s.COLS != 0 and field[x-1,y] != 1 and field[x-1,y]!= -1 and parent[current_position-1] == -1:
                 path_queue = np.append(path_queue, current_position-1)
                 parent[current_position-1] = current_position
                 distance[current_position-1] = distance[current_position] +1
@@ -356,8 +359,8 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
       path = np.flip(path)
 
       next_position = path[1]
-      next_position_x = path[1] % s.WIDTH
-      next_position_y = path[1] // s.WIDTH
+      next_position_x = path[1] % s.COLS
+      next_position_y = path[1] // s.COLS
 
       value = 1 - ( distance[pos] * (bomb_countdowns[i]-10) ) / (radius * s.BOMB_TIMER + eps)
       

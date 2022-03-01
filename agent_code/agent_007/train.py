@@ -158,17 +158,17 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        #e.INVALID_ACTION: -500,
-        #e.KILLED_SELF: -50,
-        #e.COIN_COLLECTED: 10,
+        #e.INVALID_ACTION: -300,
+        e.KILLED_SELF: -1000,
+        #e.COIN_COLLECTED: 30,
         #e.COIN_FOUND: 10,
-        #e.CRATE_DESTROYED: 15,
+        #e.CRATE_DESTROYED: 200,
         #'BOMB_HIT_NOTHING': -10,
         #'TOWARDS_COIN': 2, 
         #'NO_COIN': -1,
-        #'BOMB_NEXT_TO_CRATE': 100,
+        'BOMB_NEXT_TO_CRATE': 500,
         'NEXT_TO_CRATE': 10,
-        #'BOMB_DROPPED_FALSE': -2,
+        'BOMB_DROPPED_FALSE': -150,
         #e.WAITED: -1
     }
     reward_sum = 0

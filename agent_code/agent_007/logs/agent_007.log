@@ -1,1 +1,10 @@
-2022-03-01 16:51:40,736 [agent_007_code] INFO: Loading model from saved state.
+2022-03-01 18:38:01,365 [agent_007_code] INFO: Setting up model from scratch.
+2022-03-01 18:38:01,367 [agent_007_wrapper] ERROR: 'bool' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/manuel/Final_Project/bomberman_rl/agents.py", line 248, in process_event
+    event_result = getattr(module, event_name)(self.fake_self, *event_args)
+  File "/home/manuel/Final_Project/bomberman_rl/agent_code/agent_007/callbacks.py", line 63, in act
+    Q = np.matmul(state_to_features(self,game_state), self.weights.T)
+  File "/home/manuel/Final_Project/bomberman_rl/agent_code/agent_007/callbacks.py", line 157, in state_to_features
+    features[21] = int(len(np.array((np.where(bomb[:,0] == (x,y))))) == 0)
+TypeError: 'bool' object is not subscriptable
