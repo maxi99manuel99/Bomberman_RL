@@ -24,7 +24,7 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 26
+    self.D = 12
     self.num_actions = 6
     self.previous_move = np.array([0,0,0,0])
 
@@ -77,7 +77,7 @@ def act(self, game_state: dict) -> str:
     elif action_idx == 3:
         self.previous_move = np.array([1,0,0,0])
 
-    print(ACTIONS[action_idx])
+    #print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
 
 
@@ -102,57 +102,69 @@ def state_to_features(self, game_state: dict) -> np.array:
     features = np.zeros(self.D)
 
     field = np.array(game_state['field'])
+
     coins = np.array(game_state['coins'])
     bombs = game_state['bombs']
     explosion_map = np.array(game_state['explosion_map'])
     _, _, bomb, (x, y) = game_state['self']
 
-    #we will normalize all features to [0,1]
-    #our first 4 features are gonna be, what field type is around us
-    features[0:4] = (np.array([field[y,x+1], field[y,x-1], field[y+1,x], field[y-1,x]]) +1) / 2
+    #print(field)
 
-    #the next feature is gonna be the timestep we are currently in
-    features[4] = game_state['step'] / s.MAX_STEPS
-
+    #We will normalize all features to [0,1]
+    
     #the next feature is gonna be the direction we need to move to get to the next coin the fastest
     if len(coins) != 0:
-        features[5:9] = breath_first_search(field.copy(), np.array([x,y]), coins)
+        features[0:4] = breath_first_search(field.copy(), np.array([x,y]), coins)
     else:
-        features[5:9] = np.array([0,0,0,0])
+       features[0:4] = np.array([0,0,0,0])
 
-    features[9:13] = self.previous_move
 
     #the next feature is gonna be the direction we need to move to get to the next crate the fastest
-    crate_indices = np.array(np.where(field == 1))
+    crate_indices = np.array(np.where(field == 1)).T
 
-    """
     if crate_indices.size != 0:
-        features[13:17] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
+        features[4:8] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
     else:
-        features[13:17] = np.array([0,0,0,0])
-    """
+        features[4:8] = np.array([0,0,0,0])
+
+    #print(features[4:8])
+
+    #the next feature is gonna be if there is a crate around the player
+    features[8:12] = np.array([ int(field[x-1,y] == 1) , int(field[x+1,y] == 1), int(field[x,y-1] == 1), int(field[x,y+1] == 1) ])
+    #print(features[8:12])
+    #the next feature is gonna be if there is a wall around the player
+    #features[12:16] = np.array([ int(field[x-1,y] == -1) , int(field[x+1,y] == -1), int(field[x,y-1] == -1), int(field[x,y+1] == -1) ])
+    
+    
+    #features, which could be used
+    
+    #the next feature is gonna be the timestep we are currently in
+    #features[4] = game_state['step'] / s.MAX_STEPS
 
     #the next feature is gonna be the amount of bombs that are in a certain radius of the player
     # weighted by their distance and the time till they explode
-    features[13:17] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+    #features[13:17] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+
 
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[17:21] = (np.array([explosion_map[y,x+1], explosion_map[y,x-1], explosion_map[y+1,x], explosion_map[y-1,x]])) / s.EXPLOSION_TIMER
+    #features[17:21] = (np.array([explosion_map[y,x+1], explosion_map[y,x-1], explosion_map[y+1,x], explosion_map[y-1,x]])) / s.EXPLOSION_TIMER
+
 
     #the next feature will gonna show if a bomb action is possible
-    features[21] = int(bomb)
+    #features[21] = int(bomb)
 
-    features[22:26] = np.array([ int(field[y,x-1]==1), int(field[y,x+1]==1), int(field[y-1,x]==1), int(field[y+1,x]==1)==1  ])
 
     return features
 
-    '''# For example, you could construct several channels of equal shape, ...
+
+    ''' For example, you could construct several channels of equal shape, ...
     channels = []
     channels.append(...)
     # concatenate them as a feature tensor (they must have the same shape), ...
     stacked_channels = np.stack(channels)
     # and return them as a vector
-    return stacked_channels.reshape(-1)'''
+    return stacked_channels.reshape(-1)
+    '''
 
 #perform a breadth first sreach to get the direction to nearest coin
 def breath_first_search(field: np.array, starting_point: np.array, targets:np.array)->np.array: 
@@ -163,20 +175,18 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
     """
 
     #update the field so that the coins are included
-    #print(targets)
     for target in targets:
-        field[target[1],target[0]] = 2
+        field[target[0],target[1]] = 2
     
     #Use this list to get backtrace the path from the nearest coin to the players position to get the direction
-    parent = np.ones(s.WIDTH*s.HEIGHT) * -1
-    
+    parent = np.ones(s.COLS*s.ROWS) * -1
 
     #Queue for visiting the tiles. 
-    start = starting_point[1] * s.WIDTH + starting_point[0]
+    start = starting_point[1] * s.COLS + starting_point[0]
     parent[start] = start
 
     #check if the player is already in a coin field
-    if field[starting_point[1],starting_point[0]] == 2:
+    if field[starting_point[0],starting_point[1]] == 2:
         return np.array([0,0,0,0])
     
     path_queue = np.array([start])
@@ -190,35 +200,34 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
         current_position = path_queue[counter]
         
         #get the 2D coordinates
-        x = current_position % s.WIDTH
-        y = current_position // s.WIDTH
-        
+        x = current_position % s.COLS
+        y = current_position // s.COLS
+
         #check if we reached a coin
-        if field[y, x] == 2:
-            #print("Coin reached")
+        if field[x, y] == 2:
             coin_reached = True
             target = current_position
         
         else:
             #left from the current position. 
-            if current_position % s.WIDTH != 0 and field[y,x-1]!= -1 and parent[current_position-1] == -1:
+            if current_position % s.COLS != 0 and field[x-1,y]!= -1 and parent[current_position-1] == -1:
                 path_queue = np.append(path_queue, current_position-1)
                 parent[current_position-1] = current_position
 
             #right from the current position
-            if current_position % s.WIDTH != s.WIDTH-1 and field[y,x+1]!= -1 and parent[current_position+1] == -1:
+            if current_position % s.COLS != s.COLS-1 and field[x+1,y]!= -1 and parent[current_position+1] == -1:
                 path_queue = np.append(path_queue, current_position+1)
                 parent[current_position+1] = current_position
 
             #up from the current position
-            if current_position >= s.WIDTH and field[y-1,x]!= -1 and parent[current_position- s.WIDTH] == -1:
-                path_queue = np.append(path_queue,current_position- s.WIDTH)
-                parent[current_position- s.WIDTH] = current_position
+            if current_position >= s.COLS and field[x,y-1]!= -1 and parent[current_position- s.COLS] == -1:
+                path_queue = np.append(path_queue,current_position- s.COLS)
+                parent[current_position- s.COLS] = current_position
  
             #down from the current position
-            if y < s.HEIGHT-1 and field[y+1,x] != -1 and parent[current_position+ s.WIDTH] == -1:
-                path_queue = np.append(path_queue,current_position+ s.WIDTH)
-                parent[current_position+ s.WIDTH] = current_position
+            if y < s.HEIGHT-1 and field[x,y+1] != -1 and parent[current_position+ s.COLS] == -1:
+                path_queue = np.append(path_queue,current_position+ s.COLS)
+                parent[current_position+ s.COLS] = current_position
                 
         #increase counter to get the next tile from the queue
         counter = counter + 1
@@ -233,14 +242,15 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
 
     path = np.flip(path)
 
+    path_length = len(path)
+
     #get the second tile of the path which indicates the direction to the nearest coin
     next_position = path[1]
-    next_position_x = path[1] % s.WIDTH
-    next_position_y = path[1] // s.WIDTH
+    next_position_x = path[1] % s.COLS
+    next_position_y = path[1] // s.COLS
 
-    #use one-hot-encoding: [LEFT, RIGHT, UP, DOWN]
-    direction = [int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])]
-    
+    direction = [int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])] 
+
     return direction
 
 
@@ -263,16 +273,16 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
 
     #update the field so that the coins are included
     for bomb in bombs:
-        field[bomb[0][1],bomb[0][0]] = bomb[1] + 10
+        field[bomb[0][0],bomb[0][1]] = bomb[1] + 10
         
     #Use this list to get backtrace the path from the nearest coin to the players position to get the direction
-    parent = np.ones(s.WIDTH*s.HEIGHT) * -1
+    parent = np.ones(s.COLS*s.ROWS) * -1
 
     #distance from start position to current position
-    distance = np.zeros(s.WIDTH*s.HEIGHT-1)
+    distance = np.zeros(s.COLS*s.ROWS-1)
 
     #Queue for visiting the tiles. 
-    start = starting_point[1] * s.WIDTH + starting_point[0]
+    start = starting_point[1] * s.COLS + starting_point[0]
     
     parent[start] = start
 
@@ -294,38 +304,38 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
             distance_overceeded = True
             break
 
-        x = current_position % s.WIDTH
-        y = current_position // s.WIDTH
+        x = current_position % s.COLS
+        y = current_position // s.ROWS
         
         #check if we reached a coin
-        if field[y, x] >= 10 and current_position != start:
+        if field[x, y] >= 10 and current_position != start:
             bomb_position.append(current_position)
-            bomb_countdowns.append(field[y,x])
+            bomb_countdowns.append(field[x,y])
         
         else:
             #left from the current position. 
-            if current_position % s.WIDTH != 0 and field[y,x-1] != 1 and field[y,x-1]!= -1 and parent[current_position-1] == -1:
+            if current_position % s.COLS != 0 and field[x-1,y] != 1 and field[y,x-1]!= -1 and parent[current_position-1] == -1:
                 path_queue = np.append(path_queue, current_position-1)
                 parent[current_position-1] = current_position
                 distance[current_position-1] = distance[current_position] +1
 
             #right from the current position
-            if current_position % s.WIDTH != s.WIDTH-1 and field[y,x+1]!=1 and field[y,x+1]!= -1 and parent[current_position+1] == -1:
+            if current_position % s.COLS != s.COLS-1 and field[x+1,y]!=1 and field[x+1,y]!= -1 and parent[current_position+1] == -1:
                 path_queue = np.append(path_queue, current_position+1)
                 parent[current_position+1] = current_position
                 distance[current_position+1] = distance[current_position] +1
 
             #up from the current position
-            if current_position >= s.WIDTH and field[y-1,x]!= 1 and field[y-1,x]!= -1 and parent[current_position-s.WIDTH] == -1:
-                path_queue = np.append(path_queue,current_position-s.WIDTH)
-                parent[current_position-s.WIDTH] = current_position
-                distance[current_position-s.WIDTH] = distance[current_position] +1
+            if current_position >= s.COLS and field[x, y-1]!= 1 and field[x,y-1]!= -1 and parent[current_position-s.COLS] == -1:
+                path_queue = np.append(path_queue,current_position-s.COLS)
+                parent[current_position-s.COLS] = current_position
+                distance[current_position-s.COLS] = distance[current_position] +1
  
             #down from the current position
-            if y < s.HEIGHT-1 and field[y+1,x]!= 1 and field[y+1,x] != -1 and parent[current_position+s.WIDTH] == -1:
-                path_queue = np.append(path_queue,current_position+s.WIDTH)
-                parent[current_position+s.WIDTH] = current_position
-                distance[current_position+s.WIDTH] = distance[current_position] +1
+            if y < s.ROWS-1 and field[x, y+1]!= 1 and field[x,y+1] != -1 and parent[current_position+s.COLS] == -1:
+                path_queue = np.append(path_queue,current_position+s.COLS)
+                parent[current_position+s.COLS] = current_position
+                distance[current_position+s.COLS] = distance[current_position] +1
 
         counter = counter + 1
 

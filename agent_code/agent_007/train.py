@@ -1,9 +1,13 @@
 from collections import namedtuple, deque
+from pyexpat import features
 from attr import field
 import numpy as np
+import matplotlib.pyplot as plt
 
 import pickle
 from typing import List
+
+from sklearn.linear_model import lasso_path
 
 import events as e
 from .callbacks import state_to_features
@@ -141,7 +145,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         if len(subbatch) != 0:
             gradient_update(self, subbatch, ACTION_TO_INT[action], last_game_state["round"])
 
-    
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.weights, file)
@@ -155,26 +158,28 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        e.INVALID_ACTION: -500,
-        e.KILLED_SELF: -2000,
-        e.COIN_COLLECTED: 500,
-        e.COIN_FOUND: 500,
-        e.CRATE_DESTROYED: 500,
-        'BOMB_HIT_NOTHING': -300,
-        'TOWARDS_COIN': 10, 
-        'NO_COIN': -2,
-        'ALL_COINS': 2500,
-        'BOMB_NEXT_TO_CRATE': 300
+        #e.INVALID_ACTION: -500,
+        #e.KILLED_SELF: -50,
+        #e.COIN_COLLECTED: 10,
+        #e.COIN_FOUND: 10,
+        #e.CRATE_DESTROYED: 15,
+        #'BOMB_HIT_NOTHING': -10,
+        #'TOWARDS_COIN': 2, 
+        #'NO_COIN': -1,
+        #'BOMB_NEXT_TO_CRATE': 100,
+        'NEXT_TO_CRATE': 10,
+        #'BOMB_DROPPED_FALSE': -2,
+        #e.WAITED: -1
     }
     reward_sum = 0
     for event in events:
         if event in game_rewards:
-            #print(event)
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
 
 def append_custom_events(self,old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
+    features = state_to_features(self,old_game_state)
     """
     Appends all our custom events to the events list
     so we can calculate the total rewards out of these
@@ -201,18 +206,23 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         #every time step we do not collect a coin
         if e.COIN_COLLECTED not in events:
             events.append("NO_COIN")
-    elif np.array(np.where(np.array(new_game_state['field']) == 1)).size == 0:
-        events.append("ALL_COINS")
 
-    if e.BOMB_EXPLODED in events and e.CRATE_DESTROYED not in events and e.KILLED_OPPONENT not in events:
-        events.append("BOMB_HIT_NOTHING")
+    #if e.BOMB_EXPLODED in events and e.CRATE_DESTROYED not in events and e.KILLED_OPPONENT not in events:
+    #    events.append("BOMB_HIT_NOTHING")
 
     field = np.array(old_game_state['field'])
 
-    next_to_crate = field[old_pos[1],old_pos[0]-1] ==1 or field[old_pos[1],old_pos[0]+1] ==1 or field[old_pos[1]-1,old_pos[0]] == 1 or field[old_pos[1]+1,old_pos[0]] == 1
-
-    if e.BOMB_DROPPED in events and next_to_crate:
+    new_next_to_crate = field[new_pos[0]-1,new_pos[1]] ==1 or field[new_pos[0]+1,new_pos[1]] ==1 or field[new_pos[0],new_pos[1]-1] == 1 or field[new_pos[0],new_pos[1]+1] == 1
+    old_next_to_crate = field[old_pos[0]-1,old_pos[1]] ==1 or field[old_pos[0]+1,old_pos[1]] ==1 or field[old_pos[0],old_pos[1]-1] == 1 or field[old_pos[0],old_pos[1]+1] == 1
+    
+    if e.BOMB_DROPPED in events and old_next_to_crate:
         events.append("BOMB_NEXT_TO_CRATE")
+
+    if e.BOMB_DROPPED in events and not old_next_to_crate:
+        events.append("BOMB_DROPPED_FALSE")
+
+    if new_next_to_crate:
+        events.append("NEXT_TO_CRATE")
 
     return events
     
