@@ -32,158 +32,6 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 
-class Node:
-    pass
-
-class Tree:
-    def __init__(self):
-        self.root = Node()
-
-    def find_leaf(self, x):
-        node = self.root
-        while hasattr(node, "feature"):
-            j = node.feature
-            if x[j] <= node.threshold:
-                node = node.left
-            else:
-                node = node.right
-        return node
-
-class RegressionTree(Tree):
-    def __init__(self):
-        super(RegressionTree, self).__init__()
-
-    def train(self, data, labels, n_min=20):
-        '''
-        data: the feature matrix for all digits
-        labels: the corresponding ground-truth responses
-        n_min: termination criterion (don't split if a node contains fewer instances)
-        '''
-        N, D = data.shape
-        D_try = int(np.sqrt(D)) # how many features to consider for each split decision
-
-        # initialize the root node
-        self.root.data = data
-        self.root.labels = labels
-
-        stack = [self.root]
-        while len(stack):
-            node = stack.pop()
-            n = node.data.shape[0] # number of instances in present node
-            if n >= n_min:
-                # Call 'make_regression_split_node()' with 'D_try' randomly selected 
-                # feature indices. This turns 'node' into a split node
-                # and returns the two children, which must be placed on the 'stack'.
-                m,M = np.min(node.data,axis=0), np.max(node.data, axis=0)
-                valid_features = np.where(m != M)[0]
-
-                random_indices = np.random.choice(valid_features, replace=False, size=D_try)
-                
-                #random_indices = rand.permutation(valid_features)[:D_try]
-                left_child, right_child =  make_regression_split_node(node, random_indices)
-                stack.append(left_child)
-                stack.append(right_child)
-
-            else:
-                # Call 'make_regression_leaf_node()' to turn 'node' into a leaf node.
-                make_regression_leaf_node(node)
-    
-    def predict(self, x):
-        leaf = self.find_leaf(x)
-        # compute p(y | x)
-        return leaf.response
-
-def make_regression_split_node(node, feature_indices):
-    '''
-    node: the node to be split
-    feature_indices: a numpy array of length 'D_try', containing the feature 
-    indices to be considered in the present split
-    '''
-    n, D = node.data.shape
-
-    e_min = float("inf")
-    j_min, t_min = None, None
-
-    # find best feature j (among 'feature_indices') and best threshold t for the split
-    for j in feature_indices:
-        data_j = node.data[:, j]
-        data_unique = np.unique(data_j)
-        data_unique_size = data_unique.shape[0]
-        # Compute candidate thresholds
-        # add value at index i to value at index i+1 and divide by 2 to get every treshold candidate
-        tj = (data_unique[1:] + data_unique[0:data_unique_size-1]) / 2
-
-        for t in tj:
-            # Compute the error
-            left_child = node.data[data_j <= t]
-            right_child = node.data[data_j > t]
-            labels_l = node.labels[data_j <= t]
-            labels_r = node.labels[data_j > t]
-
-            Yl = np.mean(labels_l)
-            Yr = np.mean(labels_r)
-
-            error_l = np.sum(np.square(labels_l - Yl))
-            error_r = np.sum(np.square(labels_r - Yr))
-
-            error = error_l + error_r
-
-            # choose the best threshold that
-            if error < e_min:
-                e_min = error
-                j_min = j
-                t_min = t
-
-    # create children
-    left = Node()
-    right = Node()
-
-    data_j_min = node.data[:, j_min]
-    # initialize 'left' and 'right' with the data subsets and labels
-    # according to the optimal split found above
-    left.data = node.data[data_j_min <= t_min] # data in left node
-    left.labels = node.labels[data_j_min <= t_min] # corresponding labels
-    right.data = node.data[data_j_min > t_min]
-    right.labels = node.labels[data_j_min > t_min]
-
-    # turn the current 'node' into a split node
-    # (store children and split condition)
-    node.left = left
-    node.right = right
-    node.feature = j_min
-    node.threshold = t_min
-
-    # return the children (to be placed on the stack)
-    return left, right
-
-def make_regression_leaf_node(node):
-    '''
-    node: the node to become a leaf
-    '''
-    # compute and store leaf response
-    node.response = np.mean(node.labels) # your code here
-
-class RegressionForest():
-    def __init__(self, n_trees):
-        # create ensemble
-        self.trees = [RegressionTree() for i in range(n_trees)]
-    
-    def train(self, data, labels, n_min=0):
-        self.n_classes = np.unique(labels).shape[0]
-        for tree in self.trees:
-            # train each tree, using a bootstrap sample of the data
-            bootstrap_indices = np.random.choice(range(data.shape[0]), replace=True, size=data.shape[0])
-            bootstrap_data = data[bootstrap_indices]
-            bootstrap_labels = labels[bootstrap_indices]
-            tree.train(bootstrap_data, bootstrap_labels, n_min)
-
-    def predict(self, x):
-        predictions = np.zeros(len(self.trees))
-        # compute the ensemble prediction
-        for i,tree in enumerate(self.trees):
-            predictions[i] = tree.predict(x)
-  
-        return predictions
 
 def setup_training(self):
     """
@@ -285,11 +133,15 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     SAMPLE A BATCH FROM THE EXPERIENCE BUFFER AND USE IT TO IMPROVIZE THE WEIGHT VECTORS
     """
 
+    #only start fitting after we have tried enough random actions
+    if last_game_state['round'] < 9:
+        return
+
     #random subset of experience buffer
     indices = np.random.choice(np.arange(len(self.transitions), dtype=int), min(len(self.transitions), BATCH_SIZE), replace=False)
     batch = np.array(self.transitions, dtype=Transition)[indices]
     #print(batch)
-
+    """
     #save a list of the squared losses
     squared_loss = np.zeros(min(len(self.transitions), BATCH_SIZE))
     
@@ -298,10 +150,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     #calculate the squared loss for each training instance
     for i,transition in enumerate(batch):
         #temporal difference
-        y = temporal_difference(self, transition[3][transition[4]-1], transition[2])
+        #y = temporal_difference(self, transition[3][transition[4]-1], transition[2])
 
         #monte carlo
-        #y = monte_carlo(self, transition[3], transition[4])
+        y = monte_carlo(self, transition[3], transition[4])
 
         #n_step_td
         #y = n_step_td(self, transition[3], transition[4], transition[5])
@@ -313,22 +165,30 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         
     #sort the squarred loss list 
     best_indices = np.argpartition(squared_loss, -priority_size)[-priority_size:]
+    
 
     #now get the prioritized batch
     batch_priority = batch[best_indices]
+    """
 
     #create subbatch for every action and improve weight vector by gradient update
     for action in ACTIONS:
-        subbatch = batch_priority[np.where(batch_priority[:,1] == action)]
+        subbatch_indices = np.where(batch[:,1] == action)[0]
+        subbatch = batch[subbatch_indices]
+        
+        subbatch_old_states = np.zeros((len(subbatch_indices), self.D))
+        for i in range(len(subbatch_indices)):
+            subbatch_old_states[i] = batch[subbatch_indices[i]][0]
 
         #If an action is not present in our current batch we can not update it. Also, we send the number of rounds to the function to decrease 
         #the learning rate.
         if len(subbatch) != 0:
-            gradient_update(self, subbatch, ACTION_TO_INT[action], last_game_state["round"])
+            response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
+            self.regression_forests[ACTION_TO_INT[action]].fit(subbatch_old_states, response)
 
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.weights, file)
+        pickle.dump(self.regression_forests, file)
 
 def reward_from_events(self, events: List[str]) -> int:
     """
@@ -348,7 +208,8 @@ def reward_from_events(self, events: List[str]) -> int:
         #'TOWARDS_COIN': 2, 
         #'NO_COIN': -1,
         #'BOMB_NEXT_TO_CRATE': 500,
-        'NEXT_TO_CRATE': 10,
+        'TOWARDS_CRATE': 5,
+        'NEXT_TO_CRATE': 30,
         #'BOMB_DROPPED_FALSE': -150,
         #e.WAITED: -1
     }
@@ -377,16 +238,26 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     _, _, _, new_pos =  new_game_state['self']
     
     if len(new_game_state['coins']) != 0 and len(old_game_state['coins']) != 0:
-        best_dist_old = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
-        best_dist_new = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
+        best_dist_old_coins = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
+        best_dist_new_coins = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
 
         #check if we got closer to a coin
-        if(best_dist_new < best_dist_old):
+        if(best_dist_new_coins < best_dist_old_coins):
             events.append("TOWARDS_COIN")
 
         #every time step we do not collect a coin
         if e.COIN_COLLECTED not in events:
             events.append("NO_COIN")
+
+
+    crate_indices_old = np.array(np.where(old_game_state['field'] == 1)).T
+    crate_indices_new = np.array(np.where(new_game_state['field'] == 1)).T
+    if len(crate_indices_old) != 0 and len(crate_indices_new) != 0:
+        best_dist_old_crates = np.sum(np.abs(np.subtract(crate_indices_old, old_pos)), axis=1).min()
+        best_dist_new_crates = np.sum(np.abs(np.subtract(crate_indices_new, new_pos)), axis=1).min()
+
+        if best_dist_new_crates < best_dist_old_crates:
+            events.append("TOWARDS_CRATE")
 
     #if e.BOMB_EXPLODED in events and e.CRATE_DESTROYED not in events and e.KILLED_OPPONENT not in events:
     #    events.append("BOMB_HIT_NOTHING")

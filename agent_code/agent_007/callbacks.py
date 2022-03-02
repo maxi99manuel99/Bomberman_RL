@@ -3,12 +3,13 @@ import pickle
 import queue
 import random
 import numpy as np
+from sklearn.ensemble import RandomForestRegressor
 from collections import namedtuple, deque
 
 import settings as s
 
-
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
+
 
 def setup(self):
     """
@@ -29,12 +30,13 @@ def setup(self):
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        self.weights = np.zeros((len(ACTIONS), self.D))
+        #self.weights = np.zeros((len(ACTIONS), self.D))
+        self.regression_forests = [RandomForestRegressor() for i in range(len(ACTIONS))]
 
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
-            self.weights = pickle.load(file)
+            self.regression_forests = pickle.load(file)
 
 
 def act(self, game_state: dict) -> str:
@@ -52,18 +54,20 @@ def act(self, game_state: dict) -> str:
     #if game_state['round'] <= 10:
     #    random_prob = 0.4
 
-    if self.train and random.random() < random_prob:
+    if self.train and (random.random() < random_prob or game_state['round'] < 10):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
     
     
     #approximate Q by linear regression
-    Q = np.matmul(state_to_features(self,game_state), self.weights.T)
+    #Q = np.matmul(state_to_features(self,game_state), self.weights.T)
+
+    #approximate Q by regression forest
+    Q =  [self.regression_forests[action_idx_to_test].predict([state_to_features(self, game_state)]) for action_idx_to_test in range(len(ACTIONS))]
 
     #our policy is the argmax of the approximated Q-function
     action_idx = np.argmax(Q)
-
     #self.logger.debug("Querying model for action.")
 
     #Update the previous move(We use it for the features)
