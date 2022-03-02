@@ -24,13 +24,12 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 21
-    self.num_actions = 6
+    self.D = 12
     self.previous_move = np.array([0,0,0,0])
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        self.weights = np.zeros((self.num_actions, self.D))
+        self.weights = np.zeros((len(ACTIONS), self.D))
 
     else:
         self.logger.info("Loading model from saved state.")
@@ -123,7 +122,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     crate_indices = np.array(np.where(field == 1)).T
 
     if crate_indices.size != 0:
-        features[4:8] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
+       features[4:8] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
     else:
         features[4:8] = np.array([0,0,0,0])
 
@@ -143,18 +142,18 @@ def state_to_features(self, game_state: dict) -> np.array:
 
     #the next feature is gonna be the amount of bombs that are in a certain radius of the player
     # weighted by their distance and the time till they explode
-    features[12:16] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+    #features[12:16] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
     #print(features[12:16])
 
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[16:20] = (np.array([explosion_map[x+1,y], explosion_map[x-1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
+    #features[16:20] = (np.array([explosion_map[x+1,y], explosion_map[x-1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
 
 
     #the next feature is gonna show if a bomb action is possible
-    features[20] = int(bomb)
+    #features[20] = int(bomb)
 
     #the next feature is if we are standing on a bomb
-    features[21] = int(len(np.array((np.where(bomb[:,0] == (x,y))))) == 0)
+    #features[21] = int(len(np.array((np.where(bomb[:,0] == (x,y))))) == 0)
 
 
     return features
