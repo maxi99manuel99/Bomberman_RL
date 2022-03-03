@@ -24,7 +24,7 @@ GAMMA = 0.9 # discount factor
 N = 2 # number of timesteps to look into the future for n_step td
 
 TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
-BATCH_SIZE = 500 # subset of the transitions used for gradient update
+BATCH_SIZE = 7000 # subset of the transitions used for gradient update
 BATCH_PRIORITY_SIZE = 100 #sample the batch with the biggest squared loss
 
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
@@ -109,6 +109,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     #calculate total reward for this timestep
     step_reward = reward_from_events(self, events)
+    self.total_rewards = self.total_rewards + step_reward
 
     #append last transition (does not work for temporal difference since we needa next step)
     self.episode_transitions.append(EpisodeTransition(state_to_features(self,last_game_state), last_action, None, step_reward, last_game_state['step']))
@@ -134,7 +135,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
 
     #only start fitting after we have tried enough random actions
-    if last_game_state['round'] < 9:
+    if last_game_state['round'] < 999:
         return
 
     #random subset of experience buffer
@@ -183,7 +184,18 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         #If an action is not present in our current batch we can not update it. Also, we send the number of rounds to the function to decrease 
         #the learning rate.
         if len(subbatch) != 0:
-            response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
+            #calculate the responses
+            if last_game_state['round'] == 199 :
+                response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
+            else:
+                #continue with monte carlo
+                response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
+
+                #temporal difference 
+                #response = np.array([temporal_difference(self, transition[3][transition[4]-1], transition[2]) for transition in subbatch])
+
+
+            #train the forest
             self.regression_forests[ACTION_TO_INT[action]].fit(subbatch_old_states, response)
 
     # Store the model
@@ -199,25 +211,28 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        #e.INVALID_ACTION: -300,
-        #e.KILLED_SELF: -1000,
+        #e.INVALID_ACTION: -2,
+        e.KILLED_SELF: -2000,
         #e.COIN_COLLECTED: 30,
         #e.COIN_FOUND: 10,
-        #e.CRATE_DESTROYED: 200,
+        e.CRATE_DESTROYED: 80,
         #'BOMB_HIT_NOTHING': -10,
         #'TOWARDS_COIN': 2, 
         #'NO_COIN': -1,
         #'BOMB_NEXT_TO_CRATE': 500,
-        'TOWARDS_CRATE': 5,
-        'NEXT_TO_CRATE': 30,
+        #'TOWARDS_CRATE': 5,
+        #'NEXT_TO_CRATE': 30,
         #'BOMB_DROPPED_FALSE': -150,
         #e.WAITED: -1
     }
     reward_sum = 0
     for event in events:
         if event in game_rewards:
+            #print(events)
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
+
+    #print(reward_sum)
     return reward_sum
 
 def append_custom_events(self,old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
@@ -282,9 +297,12 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
 #TD
 def temporal_difference(self, reward, next_state):
+    print("d")
     y = reward
     if next_state is not None:
-        y = y + GAMMA * np.matmul(next_state, self.weights.T).max()
+        #y = y + GAMMA * np.matmul(next_state, self.weights.T).max()
+        Q =  [self.regression_forests[action_idx_to_test].predict([next_state]) for action_idx_to_test in range(len(ACTIONS))]
+        y = y + GAMMA * np.max(Q)
 
     return y
 

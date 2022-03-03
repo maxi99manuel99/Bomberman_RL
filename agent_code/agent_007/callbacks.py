@@ -25,7 +25,7 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 12
+    self.D = 23
     self.previous_move = np.array([0,0,0,0])
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
@@ -54,7 +54,7 @@ def act(self, game_state: dict) -> str:
     #if game_state['round'] <= 10:
     #    random_prob = 0.4
 
-    if self.train and (random.random() < random_prob or game_state['round'] < 10):
+    if self.train and (random.random() < random_prob or game_state['round'] < 1000):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
@@ -82,7 +82,7 @@ def act(self, game_state: dict) -> str:
 
     #print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
-
+    #return "WAIT"
 
 def state_to_features(self, game_state: dict) -> np.array:
     """
@@ -98,9 +98,9 @@ def state_to_features(self, game_state: dict) -> np.array:
     :param game_state:  A dictionary describing the current game board.
     :return: np.array
     """
-    # This is the dict before the game begins and after it ends
-    if game_state is None:
-        return None
+    ## This is the dict before the game begins and after it ends
+    #if game_state is None:
+    #    return None
     
     features = np.zeros(self.D)
 
@@ -130,10 +130,37 @@ def state_to_features(self, game_state: dict) -> np.array:
     else:
         features[4:8] = np.array([0,0,0,0])
 
-    #print(features[4:8])
+    #the next feature is gonna be if there is a crate in the near and we can find an escape route, so that it is sensible to drop a bomb
+    #features[8] = 0
+
+    crate_in_the_near = check_for_crates(self, np.array([x,y]), field.copy())
+
+    if crate_in_the_near:
+        #print("crate is in the near")
+        explosion_indices = np.array(np.where(explosion_map > 0)).T
+
+        #check escape route 
+        escape_possible = check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices)
+
+        if escape_possible:
+            #print("escape is possible")
+            features[8] = 1
+    
+    #print(features[8])
+    #print(features[8])
+    #the next feature is gonna be the amount of bombs that are in a certain radius of the player
+    # weighted by their distance and the time till they explode
+    features[9:14] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+    #print(features[9:14])
+    #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
+    features[14:18] = (np.array([explosion_map[x+1,y], explosion_map[x-1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
+
+    #print(features)
+    
+    features[18:22] = np.array([ int(field[x-1,y] == 0) , int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
 
     #the next feature is gonna be if there is a crate around the player
-    features[8:12] = np.array([ int(field[x-1,y] == 1) , int(field[x+1,y] == 1), int(field[x,y-1] == 1), int(field[x,y+1] == 1) ])
+    #features[8:12] = np.array([ int(field[x-1,y] == 1) , int(field[x+1,y] == 1), int(field[x,y-1] == 1), int(field[x,y+1] == 1) ])
     #print(features[8:12])
     #the next feature is gonna be if there is a wall around the player
     #features[12:16] = np.array([ int(field[x-1,y] == -1) , int(field[x+1,y] == -1), int(field[x,y-1] == -1), int(field[x,y+1] == -1) ])
@@ -175,7 +202,7 @@ def state_to_features(self, game_state: dict) -> np.array:
 #perform a breadth first sreach to get the direction to nearest coin
 def breath_first_search(field: np.array, starting_point: np.array, targets:np.array)->np.array: 
     """
-    :param: field: Describes the current game board. 0 stays for free tile, 1 for stone walls and -1 for crates
+    :param: field: Describes the current copied game board. 0 stays for free tile, 1 for stone walls and -1 for crates
             starting_point: The current position of the player. The position is a 1 dimensional value and the flattend version of the 2D field
     :return: np.array
     """
@@ -267,7 +294,7 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
 
 
     Args:
-        field (np.array): The whole game field
+        field (np.array): The whole copied game field
         starting_point (np.array): current player position
         bombs (np.array): location of the bombs
         radius (int): radius to search for bombs
@@ -314,7 +341,7 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
         y = current_position // s.ROWS
         
         #check if we reached a coin
-        if field[x, y] >= 10 and current_position != start:
+        if field[x, y] >= 10:
             bomb_position.append(current_position)
             bomb_countdowns.append(field[x,y])
         
@@ -346,11 +373,16 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
         counter = counter + 1
 
     if len(bomb_position) == 0:
-      return np.array([0,0,0,0])
+      return np.array([0,0,0,0,0])
 
-    directions = np.zeros( (len(bomb_position), 4) ) 
+    directions = np.zeros( (len(bomb_position), 5) ) 
 
     for i,pos in enumerate(bomb_position):
+
+      if pos == start:
+          directions[i] = np.array([0,0,0,0,1])
+          continue
+
       #get the path from the nearest bomb to the player
       path = [pos]
       tile = pos
@@ -367,13 +399,127 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
 
       value = 1 - ( distance[pos] * (bomb_countdowns[i]-10) ) / (radius * s.BOMB_TIMER + eps)
       
-      direction = np.array([int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])]) * value
+      direction = np.array([int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1]), 0]) * value
       directions[i] = direction
 
     direction = np.max(directions, axis=0)
 
     return direction
 
+def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
+    x, y = agent_position
+    check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
 
+    if check_right:
+        for i in range(1,4):
+            if x+i >= s.COLS:
+                break 
+
+            if field[x+i,y] == 1:
+                return True
+
+    if check_left:
+        for i in range(1,4):
+            if x-i < 0:
+                break
+
+            if field[x-i,y] == 1:
+                return True 
+
+    if check_down:
+        for i in range(1,4):
+            if y+i >= s.ROWS:
+                break
+
+            if field[x,y+i] == 1:
+                return True 
+
+    if check_up:
+        for i in range(1,4):
+            if y-i < 0:
+                break 
+            
+            if field[x,y-i] == 1:
+                return True 
+
+    return False
+
+def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array) -> bool:
+    """Tries to find an escape route after setting a bomb in the near of a crate. If there is an escape route
+    then the feature flag will be set to 1 otherwise to 0 
+
+
+    Args:
+        field (np.array): The whole copied game field
+        starting_point (np.array): current player position
+        explosions (np.array): location of explosions
+        radius (int): radius to search for bombs
+        eps (float): the factor that is responsible for amount of influence of the distance of the bomb
+
+    Returns:
+        np.array: 
+    """
+
+    #update the field so that the explosions are included 
+    for explosion_index in explosion_indices:
+        field[explosion_index[0], explosion_index[1]] = -1
+
+        
+    #distance from start position to current position
+    distance = np.zeros(s.COLS*s.ROWS-1)
+
+    #Use this list to get backtrace the path from the nearest coin to the players position to get the direction
+    parent = np.ones(s.COLS*s.ROWS) * -1
+
+    #Queue for visiting the tiles. 
+    start = starting_point[1] * s.COLS + starting_point[0]
+    
+    parent[start] = start
+
+    #queue to iterate over the tiles
+    path_queue = np.array([start])
+    counter = 0
+
+    while counter < len(path_queue):
+        current_position = path_queue[counter]
+        #print(current_position)
+        
+        #get the 2D coordinates
+        x = current_position % s.COLS
+        y = current_position // s.ROWS
+
+        #if our distance to the bomb is far enough or we would get away from the explosion, then we instantly return true
+        if distance[current_position] > 3 or (starting_point[0] != x and starting_point[1] != y):
+            #print("escape found")
+            return True
+        
+        else:
+            #left from the current position. 
+            if current_position % s.COLS != 0 and field[x-1,y] != -1 and field[x-1,y] != 1 and field[x-1,y]!= -1 and parent[current_position-1] == -1:
+                path_queue = np.append(path_queue, current_position-1)
+                parent[current_position-1] = current_position
+                distance[current_position-1] = distance[current_position] +1
+
+            #right from the current position
+            if current_position % s.COLS != s.COLS-1 and field[x+1,y] != -1 and field[x+1,y]!=1 and field[x+1,y]!= -1 and parent[current_position+1] == -1:
+                path_queue = np.append(path_queue, current_position+1)
+                parent[current_position+1] = current_position
+                distance[current_position+1] = distance[current_position] +1
+
+            #up from the current position
+            if current_position >= s.COLS and field[x,y-1] != -1 and field[x, y-1]!= 1 and field[x,y-1]!= -1 and parent[current_position-s.COLS] == -1:
+                path_queue = np.append(path_queue,current_position-s.COLS)
+                parent[current_position-s.COLS] = current_position
+                distance[current_position-s.COLS] = distance[current_position] +1
+ 
+            #down from the current position
+            if y < s.ROWS-1 and field[x,y+1] != -1 and field[x, y+1]!= 1 and field[x,y+1] != -1 and parent[current_position+s.COLS] == -1:
+                path_queue = np.append(path_queue,current_position+s.COLS)
+                parent[current_position+s.COLS] = current_position
+                distance[current_position+s.COLS] = distance[current_position] +1
+
+        counter = counter + 1
+
+    return False
 
 
