@@ -5,6 +5,7 @@ import random
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from collections import namedtuple, deque
+from typing import Tuple
 
 import settings as s
 
@@ -25,7 +26,7 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 23
+    self.D = 27
     self.previous_move = np.array([0,0,0,0])
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
@@ -80,7 +81,7 @@ def act(self, game_state: dict) -> str:
     elif action_idx == 3:
         self.previous_move = np.array([1,0,0,0])
 
-    #print(ACTIONS[action_idx])
+    print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
     #return "WAIT"
 
@@ -133,31 +134,33 @@ def state_to_features(self, game_state: dict) -> np.array:
     #the next feature is gonna be if there is a crate in the near and we can find an escape route, so that it is sensible to drop a bomb
     #features[8] = 0
 
+    explosion_indices = np.array(np.where(explosion_map > 0)).T
     crate_in_the_near = check_for_crates(self, np.array([x,y]), field.copy())
+    escape_possible, possible_escape_directions = check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs)
 
     if crate_in_the_near:
         #print("crate is in the near")
-        explosion_indices = np.array(np.where(explosion_map > 0)).T
-
-        #check escape route 
-        escape_possible = check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices)
 
         if escape_possible:
             #print("escape is possible")
             features[8] = 1
     
+    #directions in which we should escape if we could plant a bomb here
+    features[9:13] = possible_escape_directions
+    #print(possible_escape_directions)
+    
     #print(features[8])
     #print(features[8])
     #the next feature is gonna be the amount of bombs that are in a certain radius of the player
     # weighted by their distance and the time till they explode
-    features[9:14] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5)
+    features[13:18] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5)
     #print(features[9:14])
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[14:18] = (np.array([explosion_map[x-1,y], explosion_map[x+1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
+    features[18:22] = (np.array([explosion_map[x-1,y], explosion_map[x+1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
 
     #print(features)
     
-    features[18:22] = np.array([ int(field[x-1,y] == 0) , int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
+    features[22:26] = np.array([ int(field[x-1,y] == 0) , int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
 
     #print(features)
     #the next feature is gonna be if there is a crate around the player
@@ -182,7 +185,7 @@ def state_to_features(self, game_state: dict) -> np.array:
 
 
     #the next feature is gonna show if a bomb action is possible
-    features[22] = int(bomb)
+    features[26] = int(bomb)
 
     #print(features)
 
@@ -451,7 +454,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
 
     return False
 
-def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array) -> bool:
+def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array, bombs: list) -> Tuple[bool, np.array]:
     """Tries to find an escape route after setting a bomb in the near of a crate. If there is an escape route
     then the feature flag will be set to 1 otherwise to 0 
 
@@ -459,17 +462,21 @@ def check_escape_route(self, field: np.array, starting_point: np.array, explosio
     Args:
         field (np.array): The whole copied game field
         starting_point (np.array): current player position
-        explosions (np.array): location of explosions
-        radius (int): radius to search for bombs
-        eps (float): the factor that is responsible for amount of influence of the distance of the bomb
+        explosion_indices (np.array): location of explosions
+        bombs (list): location of bombs
 
     Returns:
-        np.array: 
+        bool: True if there was an escape route found
+        np.array: All directions the agent can move in to follow one of the found escape paths
     """
 
-    #update the field so that the explosions are included 
+    #update the field so that the explosions are included, treated like walls so you cant escape that way
     for explosion_index in explosion_indices:
         field[explosion_index[0], explosion_index[1]] = -1
+
+    #update field so bombs are included, treated like walls so you cant escape that way
+    for bomb in bombs:
+        field[bomb[0][0],bomb[0][1]] = -1
 
         
     #distance from start position to current position
@@ -487,6 +494,9 @@ def check_escape_route(self, field: np.array, starting_point: np.array, explosio
     path_queue = np.array([start])
     counter = 0
 
+    directions_to_escape = np.zeros(4)
+    escape_found = False
+
     while counter < len(path_queue):
         current_position = path_queue[counter]
         #print(current_position)
@@ -498,7 +508,21 @@ def check_escape_route(self, field: np.array, starting_point: np.array, explosio
         #if our distance to the bomb is far enough or we would get away from the explosion, then we instantly return true
         if distance[current_position] > 3 or (starting_point[0] != x and starting_point[1] != y):
             #print("escape found")
-            return True
+            pos = int(current_position)
+            while True:
+                if parent[pos] == start:
+                    next_position_x = pos % s.COLS
+                    next_position_y = pos // s.COLS
+                    direction = np.array([int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])])
+                    directions_to_escape = np.max(np.vstack((direction, directions_to_escape)), axis=0)
+
+                    break
+
+                pos = int(parent[pos])
+                
+
+                
+            escape_found = True
         
         else:
             #left from the current position. 
@@ -527,6 +551,6 @@ def check_escape_route(self, field: np.array, starting_point: np.array, explosio
 
         counter = counter + 1
 
-    return False
+    return escape_found, directions_to_escape
 
 

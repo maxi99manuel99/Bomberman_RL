@@ -13,6 +13,15 @@ import settings as s
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 ACTION_TO_INT = {'UP':0, 'RIGHT' : 1 , 'DOWN': 2, 'LEFT': 3, 'WAIT':4, 'BOMB': 5}
+FEATURES_TO_INT = {"DIRECTION_TO_COIN": [0,1,2,3],
+                   "DIRECTION_TO_CRATE": [4,5,6,7],
+                   "GOOD_BOMB_SPOT": 8,
+                   "DIRECTION_TO_ESCAPE": [9,10,11,12],
+                   "DIRECTION_OF_DANGER": [13,14,15,16],
+                   "STANDING_ON_A_BOMB": 17,
+                   "EXPLOSION_IN_THE_NEAR": [18,19,20,21],
+                   "VALID_MOVES": [22,23,24,25],
+                   "BOMB_ACTIVE": 26}
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'episode_rewards', 'timestep', 'episode_next_states'))
@@ -212,8 +221,9 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        e.INVALID_ACTION: -3,
-        'VALID_ACTION':1,
+        #Made a move thats not in free moves (features[18:22])
+        e.INVALID_ACTION: -70,
+        #'VALID_ACTION':1,
         e.KILLED_SELF: -100,
         e.COIN_COLLECTED: 80,
         e.COIN_FOUND: 10,
@@ -222,12 +232,15 @@ def reward_from_events(self, events: List[str]) -> int:
         #'BOMB_HIT_NOTHING': -10,
         'TOWARDS_COIN': 15, 
         #'NO_COIN': -1,
-        'BOMB_NEXT_TO_CRATE': 20,
+        'BOMB_NEXT_TO_CRATE': 10,
         'TOWARDS_CRATE': 5,
         'ESCAPE': 30,
         #e.WAITED: -1
         #'NEXT_TO_CRATE': 30,
-        #'BOMB_DROPPED_FALSE': -150,
+        'BOMB_DROPPED_NO_ESCAPE': -100,
+        'GOOD_BOMB': 20,
+        'AWAY_FROM_DEADEND': 50,
+        'WAITING_ON_BOMB': -20
         #e.WAITED: -1
     }
     reward_sum = 0
@@ -290,8 +303,23 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     if e.BOMB_DROPPED in events and old_next_to_crate:
         events.append("BOMB_NEXT_TO_CRATE")
 
-    if e.BOMB_DROPPED in events and not old_next_to_crate:
-        events.append("BOMB_DROPPED_FALSE")
+    #when the agent places a bomb which there is no chance of escaping for him
+    if e.BOMB_DROPPED in events and features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 0:
+        events.append("BOMB_DROPPED_NO_ESCAPE")
+
+    #if it was a sensible place to place a bomb (near crate and there is an escape path)
+    if e.BOMB_DROPPED in events and features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 1:
+        events.append("GOOD_BOMB")
+
+    #when the agent is standing on a bomb and takes a step that is not leading to a dead end
+    left_is_good, right_is_good, up_is_good, down_is_good = features[FEATURES_TO_INT['DIRECTION_TO_ESCAPE']]
+    if features[FEATURES_TO_INT['STANDING_ON_A_BOMB']] == 1:
+        if (left_is_good == 1 and e.MOVED_LEFT in events) or (right_is_good == 1 and e.MOVED_RIGHT in events) or (up_is_good == 1 and e.MOVED_UP in events) or (down_is_good == 1 and e.MOVED_DOWN in events):
+            events.append("AWAY_FROM_DEADEND")
+    
+    #if the agent is standing on a bomb and is waiting to be killed
+    if features[FEATURES_TO_INT['STANDING_ON_A_BOMB']] == 1 and e.WAITED in events:
+        events.append("WAITING_ON_BOMB")
 
     if new_next_to_crate:
         events.append("NEXT_TO_CRATE")
