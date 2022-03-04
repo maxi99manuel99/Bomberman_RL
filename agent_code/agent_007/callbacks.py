@@ -54,7 +54,7 @@ def act(self, game_state: dict) -> str:
     #if game_state['round'] <= 10:
     #    random_prob = 0.4
 
-    if self.train and (random.random() < random_prob or game_state['round'] < 1000):
+    if self.train and (random.random() < random_prob or game_state['round'] < 500):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
@@ -150,15 +150,16 @@ def state_to_features(self, game_state: dict) -> np.array:
     #print(features[8])
     #the next feature is gonna be the amount of bombs that are in a certain radius of the player
     # weighted by their distance and the time till they explode
-    features[9:14] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5, 0.5)
+    features[9:14] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5)
     #print(features[9:14])
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[14:18] = (np.array([explosion_map[x+1,y], explosion_map[x-1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
+    features[14:18] = (np.array([explosion_map[x-1,y], explosion_map[x+1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
 
     #print(features)
     
     features[18:22] = np.array([ int(field[x-1,y] == 0) , int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
 
+    #print(features)
     #the next feature is gonna be if there is a crate around the player
     #features[8:12] = np.array([ int(field[x-1,y] == 1) , int(field[x+1,y] == 1), int(field[x,y-1] == 1), int(field[x,y+1] == 1) ])
     #print(features[8:12])
@@ -181,7 +182,9 @@ def state_to_features(self, game_state: dict) -> np.array:
 
 
     #the next feature is gonna show if a bomb action is possible
-    #features[20] = int(bomb)
+    features[22] = int(bomb)
+
+    #print(features)
 
     #the next feature is if we are standing on a bomb
     #features[21] = int(len(np.array((np.where(bomb[:,0] == (x,y))))) == 0)
@@ -288,7 +291,7 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
 
 
 #perform a breadth first sreach that searches for bombs in a given radius
-def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: list, radius: int, eps: float) -> np.array:
+def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: list, radius: int) -> np.array:
     """Searches for bombs in a certain radius around the player and
        weights them by how long they need till they explode and how far away they are
 
@@ -397,7 +400,11 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
       next_position_x = path[1] % s.COLS
       next_position_y = path[1] // s.COLS
 
-      value = 1 - ( distance[pos] * (bomb_countdowns[i]-10) ) / (radius * s.BOMB_TIMER + eps)
+      value = 1 - ( distance[pos] * (bomb_countdowns[i]-10) ) / (radius * s.BOMB_TIMER)
+      #print(distance[pos])
+      #print(bomb_countdowns[i]-10)
+      #print(value)
+      #print(s.BOMB_TIMER)
       
       direction = np.array([int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1]), 0]) * value
       directions[i] = direction
