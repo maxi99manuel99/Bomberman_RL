@@ -1,4 +1,5 @@
 from collections import namedtuple, deque
+from hashlib import new
 from pyexpat import features
 from attr import field
 import numpy as np
@@ -20,7 +21,7 @@ EpisodeTransition = namedtuple('EpisodeTransition',
                         ('state', 'action', 'next_state', 'reward', 'timestep'))                    
 
 # Hyper parameters -- DO modify
-GAMMA = 0.9 # discount factor
+GAMMA = 0.1 # discount factor
 N = 2 # number of timesteps to look into the future for n_step td
 
 TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
@@ -135,7 +136,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
 
     #only start fitting after we have tried enough random actions
-    if last_game_state['round'] < 999:
+    if last_game_state['round'] < 499:
         return
 
     #random subset of experience buffer
@@ -185,7 +186,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         #the learning rate.
         if len(subbatch) != 0:
             #calculate the responses
-            if last_game_state['round'] == 199 :
+            if last_game_state['round'] == 499 :
                 response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
             else:
                 #continue with monte carlo
@@ -211,16 +212,20 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        #e.INVALID_ACTION: -2,
-        e.KILLED_SELF: -2000,
-        #e.COIN_COLLECTED: 30,
-        #e.COIN_FOUND: 10,
-        e.CRATE_DESTROYED: 80,
+        e.INVALID_ACTION: -3,
+        'VALID_ACTION':1,
+        e.KILLED_SELF: -100,
+        e.COIN_COLLECTED: 80,
+        e.COIN_FOUND: 10,
+        e.CRATE_DESTROYED: 40,
+        e.SURVIVED_ROUND: 100,
         #'BOMB_HIT_NOTHING': -10,
-        #'TOWARDS_COIN': 2, 
+        'TOWARDS_COIN': 15, 
         #'NO_COIN': -1,
-        #'BOMB_NEXT_TO_CRATE': 500,
-        #'TOWARDS_CRATE': 5,
+        'BOMB_NEXT_TO_CRATE': 20,
+        'TOWARDS_CRATE': 5,
+        'ESCAPE': 30,
+        #e.WAITED: -1
         #'NEXT_TO_CRATE': 30,
         #'BOMB_DROPPED_FALSE': -150,
         #e.WAITED: -1
@@ -290,6 +295,43 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
     if new_next_to_crate:
         events.append("NEXT_TO_CRATE")
+
+    if e.INVALID_ACTION not in events:
+        events.append("VALID_ACTION")
+
+    bomb_old = np.array(old_game_state['bombs'], dtype =object)
+    bomb_new = np.array(new_game_state['bombs'], dtype =object)
+
+    
+    if len(bomb_old) != 0 and len(bomb_new) != 0:
+        bomb_indices_old = np.zeros(len(bomb_old), dtype =object)
+        bomb_indices_new = np.zeros(len(bomb_new), dtype =object)
+
+        for i, bomb in enumerate(bomb_old):
+            bomb_indices_old = np.vstack( (bomb_indices_old, np.array(bomb[i][0])) )
+
+        for i, bomb in enumerate(bomb_new):
+            bomb_indices_new = np.vstack( (bomb_indices_new, np.array(bomb[i][0])) )
+
+        #print(bomb_indices_old)
+        #print(bomb_indices_new)
+
+        #print(np.abs(np.subtract(bomb_indices_old, old_pos)))
+
+        best_dist_old_bombs = None
+        if len(bomb_indices_old) == 1:
+            best_dist_old_bombs = np.sum(np.abs(np.subtract(bomb_indices_old, old_pos))).min()
+        else:
+            best_dist_old_bombs = np.sum(np.abs(np.subtract(bomb_indices_old, old_pos)),axis=1).min()
+
+        best_dist_new_bombs = None
+        if len(bomb_indices_new) == 1:
+            best_dist_new_bombs = np.sum(np.abs(np.subtract(bomb_indices_new, new_pos))).min()
+        else:
+            best_dist_new_bombs = np.sum(np.abs(np.subtract(bomb_indices_new, new_pos)),axis=1).min()
+
+        if best_dist_new_bombs > best_dist_old_bombs:
+            events.append("ESCAPE")
 
     return events
 
