@@ -26,7 +26,7 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 27
+    self.D = 28
     self.previous_move = np.array([0,0,0,0])
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
@@ -81,7 +81,7 @@ def act(self, game_state: dict) -> str:
     elif action_idx == 3:
         self.previous_move = np.array([1,0,0,0])
 
-    print(ACTIONS[action_idx])
+    #print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
     #return "WAIT"
 
@@ -135,7 +135,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     #features[8] = 0
 
     explosion_indices = np.array(np.where(explosion_map > 0)).T
-    crate_in_the_near = check_for_crates(self, np.array([x,y]), field.copy())
+    crate_in_the_near, number_near_crates = check_for_crates(self, np.array([x,y]), field.copy())
     escape_possible, possible_escape_directions = check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs)
 
     if crate_in_the_near:
@@ -186,6 +186,10 @@ def state_to_features(self, game_state: dict) -> np.array:
 
     #the next feature is gonna show if a bomb action is possible
     features[26] = int(bomb)
+
+    #the next feature is gonna be how many crates are in our bomb radius right now
+    features[27] = number_near_crates
+
 
     #print(features)
 
@@ -419,6 +423,8 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
 def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
     x, y = agent_position
     check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
+    any_chest_found = False
+    chest_counter = 0
 
     if check_right:
         for i in range(1,4):
@@ -426,7 +432,8 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break 
 
             if field[x+i,y] == 1:
-                return True
+                any_chest_found = True
+                chest_counter = chest_counter + 1
 
     if check_left:
         for i in range(1,4):
@@ -434,7 +441,8 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break
 
             if field[x-i,y] == 1:
-                return True 
+                any_chest_found = True
+                chest_counter = chest_counter + 1
 
     if check_down:
         for i in range(1,4):
@@ -442,7 +450,8 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break
 
             if field[x,y+i] == 1:
-                return True 
+                any_chest_found = True
+                chest_counter = chest_counter +1
 
     if check_up:
         for i in range(1,4):
@@ -450,9 +459,13 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break 
             
             if field[x,y-i] == 1:
-                return True 
+                any_chest_found = True
+                chest_counter = chest_counter + 1
+    
+    chest_counter = chest_counter / 9 #since 9 is the maximum number of chests you can destroy with one bomb
+                                      #(appart from sitting in the middle of 12 bombs which is not a sensible case of the game)
 
-    return False
+    return any_chest_found, chest_counter
 
 def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array, bombs: list) -> Tuple[bool, np.array]:
     """Tries to find an escape route after setting a bomb in the near of a crate. If there is an escape route

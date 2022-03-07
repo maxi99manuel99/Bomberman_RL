@@ -21,7 +21,8 @@ FEATURES_TO_INT = {"DIRECTION_TO_COIN": [0,1,2,3],
                    "STANDING_ON_A_BOMB": 17,
                    "EXPLOSION_IN_THE_NEAR": [18,19,20,21],
                    "VALID_MOVES": [22,23,24,25],
-                   "BOMB_ACTIVE": 26}
+                   "BOMB_ACTIVE": 26,
+                   "NUMBER_NEAR_BOMBS": 27}
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'episode_rewards', 'timestep', 'episode_next_states'))
@@ -84,7 +85,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     #In the first game state our agent can not achieve anything so we ingore it
     if old_game_state == None:
-        return
+        return 
         
     #Append custom events for rewards
     total_events = append_custom_events(self, old_game_state, new_game_state, events)
@@ -116,7 +117,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
     #print(last_game_state['step'])
-
     #calculate total reward for this timestep
     step_reward = reward_from_events(self, events)
     self.total_rewards = self.total_rewards + step_reward
@@ -224,17 +224,17 @@ def reward_from_events(self, events: List[str]) -> int:
         #Made a move thats not in free moves (features[18:22])
         e.INVALID_ACTION: -70,
         #'VALID_ACTION':1,
-        e.KILLED_SELF: -100,
+        e.KILLED_SELF: -500,
         e.COIN_COLLECTED: 80,
         e.COIN_FOUND: 10,
-        e.CRATE_DESTROYED: 40,
-        e.SURVIVED_ROUND: 100,
+        e.CRATE_DESTROYED: 35,
+        e.SURVIVED_ROUND: 300,
         #'BOMB_HIT_NOTHING': -10,
         'TOWARDS_COIN': 15, 
         #'NO_COIN': -1,
         'BOMB_NEXT_TO_CRATE': 10,
-        'TOWARDS_CRATE': 5,
-        'ESCAPE': 30,
+        'TOWARDS_CRATE': 15,
+        'ESCAPE': 50,
         #e.WAITED: -1
         #'NEXT_TO_CRATE': 30,
         'BOMB_DROPPED_NO_ESCAPE': -100,
@@ -246,7 +246,6 @@ def reward_from_events(self, events: List[str]) -> int:
     reward_sum = 0
     for event in events:
         if event in game_rewards:
-            #print(events)
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
 
