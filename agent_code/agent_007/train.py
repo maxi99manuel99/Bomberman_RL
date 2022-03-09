@@ -221,27 +221,21 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        #Made a move thats not in free moves (features[18:22])
         e.INVALID_ACTION: -70,
-        #'VALID_ACTION':1,
         e.KILLED_SELF: -500,
         e.COIN_COLLECTED: 80,
         e.COIN_FOUND: 10,
         e.CRATE_DESTROYED: 35,
         e.SURVIVED_ROUND: 300,
-        #'BOMB_HIT_NOTHING': -10,
         'TOWARDS_COIN': 15, 
-        #'NO_COIN': -1,
         'BOMB_NEXT_TO_CRATE': 10,
         'TOWARDS_CRATE': 15,
         'ESCAPE': 50,
-        #e.WAITED: -1
-        #'NEXT_TO_CRATE': 30,
         'BOMB_DROPPED_NO_ESCAPE': -100,
         'GOOD_BOMB': 20,
         'AWAY_FROM_DEADEND': 50,
-        'WAITING_ON_BOMB': -20
-        #e.WAITED: -1
+        'WAITING_ON_BOMB': -20,
+        'DANGER': -100
     }
     reward_sum = 0
     for event in events:
@@ -291,9 +285,6 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         if best_dist_new_crates < best_dist_old_crates:
             events.append("TOWARDS_CRATE")
 
-    #if e.BOMB_EXPLODED in events and e.CRATE_DESTROYED not in events and e.KILLED_OPPONENT not in events:
-    #    events.append("BOMB_HIT_NOTHING")
-
     field = np.array(old_game_state['field'])
 
     new_next_to_crate = field[new_pos[0]-1,new_pos[1]] ==1 or field[new_pos[0]+1,new_pos[1]] ==1 or field[new_pos[0],new_pos[1]-1] == 1 or field[new_pos[0],new_pos[1]+1] == 1
@@ -310,16 +301,18 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     if e.BOMB_DROPPED in events and features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 1:
         events.append("GOOD_BOMB")
 
+    """
     #when the agent is standing on a bomb and takes a step that is not leading to a dead end
     left_is_good, right_is_good, up_is_good, down_is_good = features[FEATURES_TO_INT['DIRECTION_TO_ESCAPE']]
     if features[FEATURES_TO_INT['STANDING_ON_A_BOMB']] == 1:
         if (left_is_good == 1 and e.MOVED_LEFT in events) or (right_is_good == 1 and e.MOVED_RIGHT in events) or (up_is_good == 1 and e.MOVED_UP in events) or (down_is_good == 1 and e.MOVED_DOWN in events):
             events.append("AWAY_FROM_DEADEND")
     
+    
     #if the agent is standing on a bomb and is waiting to be killed
     if features[FEATURES_TO_INT['STANDING_ON_A_BOMB']] == 1 and e.WAITED in events:
         events.append("WAITING_ON_BOMB")
-
+    """
     if new_next_to_crate:
         events.append("NEXT_TO_CRATE")
 
@@ -329,7 +322,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     bomb_old = np.array(old_game_state['bombs'], dtype =object)
     bomb_new = np.array(new_game_state['bombs'], dtype =object)
 
-    
+    """
     if len(bomb_old) != 0 and len(bomb_new) != 0:
         bomb_indices_old = np.zeros(len(bomb_old), dtype =object)
         bomb_indices_new = np.zeros(len(bomb_new), dtype =object)
@@ -339,11 +332,6 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
         for i, bomb in enumerate(bomb_new):
             bomb_indices_new = np.vstack( (bomb_indices_new, np.array(bomb[i][0])) )
-
-        #print(bomb_indices_old)
-        #print(bomb_indices_new)
-
-        #print(np.abs(np.subtract(bomb_indices_old, old_pos)))
 
         best_dist_old_bombs = None
         if len(bomb_indices_old) == 1:
@@ -359,6 +347,19 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
         if best_dist_new_bombs > best_dist_old_bombs:
             events.append("ESCAPE")
+    """
+
+    if np.any(features[13:18]== 0):
+        if features[13] == 1 and e.MOVED_LEFT:
+            events.append("DANGER")
+        if features[14] == 1 and e.MOVED_RIGHT:
+            events.append("DANGER")
+        if features[15] == 1 and e.MOVED_UP:
+            events.append("DANGER")
+        if features[16] == 1 and e.MOVED_DOWN:
+            events.append("DANGER")
+        if features[17] == 1 and e.WAITED:
+            events.append("DANGER")
 
     return events
 
