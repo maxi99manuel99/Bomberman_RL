@@ -8,21 +8,20 @@ import pickle
 from typing import List
 
 import events as e
-from .callbacks import state_to_features
+from .callbacks import danger, state_to_features
 import settings as s
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 ACTION_TO_INT = {'UP':0, 'RIGHT' : 1 , 'DOWN': 2, 'LEFT': 3, 'WAIT':4, 'BOMB': 5}
+
 FEATURES_TO_INT = {"DIRECTION_TO_COIN": [0,1,2,3],
                    "DIRECTION_TO_CRATE": [4,5,6,7],
                    "GOOD_BOMB_SPOT": 8,
-                   "DIRECTION_TO_ESCAPE": [9,10,11,12],
-                   "DIRECTION_OF_DANGER": [13,14,15,16],
-                   "STANDING_ON_A_BOMB": 17,
-                   "EXPLOSION_IN_THE_NEAR": [18,19,20,21],
-                   "VALID_MOVES": [22,23,24,25],
-                   "BOMB_ACTIVE": 26,
-                   "NUMBER_NEAR_BOMBS": 27}
+                   "DANGEROUS_ACTION": [9,10,11,12,13],
+                   "EXPLOSION_IN_THE_NEAR": [14,15,16,17],
+                   "VALID_MOVES": [18,19,20,21],
+                   "BOMB_ACTIVE": 22}
+
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'episode_rewards', 'timestep', 'episode_next_states'))
@@ -85,7 +84,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     #In the first game state our agent can not achieve anything so we ingore it
     if old_game_state == None:
-        return 
+        return
         
     #Append custom events for rewards
     total_events = append_custom_events(self, old_game_state, new_game_state, events)
@@ -100,7 +99,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.episode_reward_vector.append(step_reward)
     self.episode_next_states.append(state_to_features(self, new_game_state))
 
-    #print(old_game_state['step'])
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """
@@ -116,7 +114,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    #print(last_game_state['step'])
+
     #calculate total reward for this timestep
     step_reward = reward_from_events(self, events)
     self.total_rewards = self.total_rewards + step_reward
@@ -133,7 +131,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     #reset total rewards per game back to 0
     #clear episode_rewards and episode_transitions
     print("total rewards: ",self.total_rewards)
-    #print("episode reward vector", self.episode_reward_vector)
+
     self.total_rewards = 0
     self.episode_reward_vector.clear()
     self.episode_next_states.clear()
@@ -151,37 +149,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     #random subset of experience buffer
     indices = np.random.choice(np.arange(len(self.transitions), dtype=int), min(len(self.transitions), BATCH_SIZE), replace=False)
     batch = np.array(self.transitions, dtype=Transition)[indices]
-    #print(batch)
-    """
-    #save a list of the squared losses
-    squared_loss = np.zeros(min(len(self.transitions), BATCH_SIZE))
-    
-    priority_size = min(len(self.transitions), BATCH_PRIORITY_SIZE)
-
-    #calculate the squared loss for each training instance
-    for i,transition in enumerate(batch):
-        #temporal difference
-        #y = temporal_difference(self, transition[3][transition[4]-1], transition[2])
-
-        #monte carlo
-        y = monte_carlo(self, transition[3], transition[4])
-
-        #n_step_td
-        #y = n_step_td(self, transition[3], transition[4], transition[5])
-        
-        #other methods
-        ...
-        #print(y)
-        squared_loss[i] = np.square( y - transition[0].dot(self.weights[ACTION_TO_INT[transition[1]]]) )
-        
-    #sort the squarred loss list 
-    best_indices = np.argpartition(squared_loss, -priority_size)[-priority_size:]
-    
-
-    #now get the prioritized batch
-    batch_priority = batch[best_indices]
-    """
-
+   
     #create subbatch for every action and improve weight vector by gradient update
     for action in ACTIONS:
         subbatch_indices = np.where(batch[:,1] == action)[0]
@@ -204,7 +172,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                 #temporal difference 
                 #response = np.array([temporal_difference(self, transition[3][transition[4]-1], transition[2]) for transition in subbatch])
 
-
             #train the forest
             self.regression_forests[ACTION_TO_INT[action]].fit(subbatch_old_states, response)
 
@@ -221,25 +188,21 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        e.INVALID_ACTION: -70,
+        #Made a move thats not in free moves (features[18:22])
+        e.INVALID_ACTION: -10,
         e.KILLED_SELF: -500,
-        e.COIN_COLLECTED: 80,
-        e.COIN_FOUND: 10,
-        e.CRATE_DESTROYED: 35,
-        e.SURVIVED_ROUND: 300,
-        'TOWARDS_COIN': 15, 
-        'BOMB_NEXT_TO_CRATE': 10,
-        'TOWARDS_CRATE': 15,
-        'ESCAPE': 50,
-        'BOMB_DROPPED_NO_ESCAPE': -100,
-        'GOOD_BOMB': 20,
-        'AWAY_FROM_DEADEND': 50,
-        'WAITING_ON_BOMB': -20,
-        'DANGER': -100
+        'LIFE_SAVING_MOVE': 20,
+        'GOOD_BOMB_PLACEMENT': 10,
+        'BAD_BOMB_PLACEMENT': -50,
+        'DEADLY_MOVE': -50,
+        'MOVES_TOWARD_TARGET': 5,
+        'WAITING_ONLY_OPTION': 10,
+        'BAD_MOVE': -4,
     }
     reward_sum = 0
     for event in events:
         if event in game_rewards:
+            #print(events)
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
 
@@ -262,104 +225,57 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     """
     _, _, _, old_pos = old_game_state['self']
     _, _, _, new_pos =  new_game_state['self']
-    
-    if len(new_game_state['coins']) != 0 and len(old_game_state['coins']) != 0:
-        best_dist_old_coins = np.sum(np.abs(np.subtract(old_game_state['coins'], old_pos)), axis=1).min()
-        best_dist_new_coins = np.sum(np.abs(np.subtract(new_game_state['coins'], new_pos)), axis=1).min()
 
-        #check if we got closer to a coin
-        if(best_dist_new_coins < best_dist_old_coins):
-            events.append("TOWARDS_COIN")
+    danger_left , danger_right, danger_up, danger_down , danger_wait = features[FEATURES_TO_INT['DANGEROUS_ACTION']]
 
-        #every time step we do not collect a coin
-        if e.COIN_COLLECTED not in events:
-            events.append("NO_COIN")
+    if e.INVALID_ACTION in events:
+        return events
 
+    #check, if waiting is dangerous we need to move 
+    if danger_wait == 1: 
+        #check if did a life saving move
+        if danger_left == 0 and e.MOVED_LEFT in events:
+            events.append("LIFE_SAVING_MOVE")
+        elif danger_right == 0 and e.MOVED_RIGHT in events:
+            events.append("LIFE_SAVING_MOVE")
+        elif danger_up == 0 and e.MOVED_UP in events:
+            events.append("LIFE_SAVING_MOVE")
+        elif danger_down == 0 and e.MOVED_DOWN in events:
+            events.append("LIFE_SAVING_MOVE")
+        else: 
+            events.append("DEADLY_MOVE")
 
-    crate_indices_old = np.array(np.where(old_game_state['field'] == 1)).T
-    crate_indices_new = np.array(np.where(new_game_state['field'] == 1)).T
-    if len(crate_indices_old) != 0 and len(crate_indices_new) != 0:
-        best_dist_old_crates = np.sum(np.abs(np.subtract(crate_indices_old, old_pos)), axis=1).min()
-        best_dist_new_crates = np.sum(np.abs(np.subtract(crate_indices_new, new_pos)), axis=1).min()
-
-        if best_dist_new_crates < best_dist_old_crates:
-            events.append("TOWARDS_CRATE")
-
-    field = np.array(old_game_state['field'])
-
-    new_next_to_crate = field[new_pos[0]-1,new_pos[1]] ==1 or field[new_pos[0]+1,new_pos[1]] ==1 or field[new_pos[0],new_pos[1]-1] == 1 or field[new_pos[0],new_pos[1]+1] == 1
-    old_next_to_crate = field[old_pos[0]-1,old_pos[1]] ==1 or field[old_pos[0]+1,old_pos[1]] ==1 or field[old_pos[0],old_pos[1]-1] == 1 or field[old_pos[0],old_pos[1]+1] == 1
-    
-    if e.BOMB_DROPPED in events and old_next_to_crate:
-        events.append("BOMB_NEXT_TO_CRATE")
-
-    #when the agent places a bomb which there is no chance of escaping for him
-    if e.BOMB_DROPPED in events and features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 0:
-        events.append("BOMB_DROPPED_NO_ESCAPE")
-
-    #if it was a sensible place to place a bomb (near crate and there is an escape path)
-    if e.BOMB_DROPPED in events and features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 1:
-        events.append("GOOD_BOMB")
-
-    """
-    #when the agent is standing on a bomb and takes a step that is not leading to a dead end
-    left_is_good, right_is_good, up_is_good, down_is_good = features[FEATURES_TO_INT['DIRECTION_TO_ESCAPE']]
-    if features[FEATURES_TO_INT['STANDING_ON_A_BOMB']] == 1:
-        if (left_is_good == 1 and e.MOVED_LEFT in events) or (right_is_good == 1 and e.MOVED_RIGHT in events) or (up_is_good == 1 and e.MOVED_UP in events) or (down_is_good == 1 and e.MOVED_DOWN in events):
-            events.append("AWAY_FROM_DEADEND")
-    
-    
-    #if the agent is standing on a bomb and is waiting to be killed
-    if features[FEATURES_TO_INT['STANDING_ON_A_BOMB']] == 1 and e.WAITED in events:
-        events.append("WAITING_ON_BOMB")
-    """
-    if new_next_to_crate:
-        events.append("NEXT_TO_CRATE")
-
-    if e.INVALID_ACTION not in events:
-        events.append("VALID_ACTION")
-
-    bomb_old = np.array(old_game_state['bombs'], dtype =object)
-    bomb_new = np.array(new_game_state['bombs'], dtype =object)
-
-    """
-    if len(bomb_old) != 0 and len(bomb_new) != 0:
-        bomb_indices_old = np.zeros(len(bomb_old), dtype =object)
-        bomb_indices_new = np.zeros(len(bomb_new), dtype =object)
-
-        for i, bomb in enumerate(bomb_old):
-            bomb_indices_old = np.vstack( (bomb_indices_old, np.array(bomb[i][0])) )
-
-        for i, bomb in enumerate(bomb_new):
-            bomb_indices_new = np.vstack( (bomb_indices_new, np.array(bomb[i][0])) )
-
-        best_dist_old_bombs = None
-        if len(bomb_indices_old) == 1:
-            best_dist_old_bombs = np.sum(np.abs(np.subtract(bomb_indices_old, old_pos))).min()
+    elif e.BOMB_DROPPED in events:
+        #check if dropped the bomb correctly
+        if features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 1:
+            events.append("GOOD_BOMB_PLACEMENT")
         else:
-            best_dist_old_bombs = np.sum(np.abs(np.subtract(bomb_indices_old, old_pos)),axis=1).min()
+            events.append("BAD_BOMB_PLACEMENT")
+    else:
+        valid_list = features[FEATURES_TO_INT['VALID_MOVES']].copy()
+        valid_list[ np.where( np.logical_or(features[9:13] == 1, features[14:18] == 1) ) ] = 0
 
-        best_dist_new_bombs = None
-        if len(bomb_indices_new) == 1:
-            best_dist_new_bombs = np.sum(np.abs(np.subtract(bomb_indices_new, new_pos))).min()
+        explosion_left , explosion_right, explosion_up, explosion_down = features[FEATURES_TO_INT['EXPLOSION_IN_THE_NEAR']]
+        coin_left , coin_right, coin_up, coin_down = features[FEATURES_TO_INT['DIRECTION_TO_COIN']]
+        crate_left , crate_right, crate_up, crate_down = features[FEATURES_TO_INT['DIRECTION_TO_CRATE']]
+        
+        if np.all(valid_list == 0) and e.WAITED in events:
+            events.append("WAITING_ONLY_OPTION")
+        
+        #check if performed a deadly move 
+        #->bomb
+        elif (danger_left == 1 and e.MOVED_LEFT in events) or (danger_right == 1 and e.MOVED_RIGHT in events) or (danger_up == 1 and e.MOVED_UP in events) or (danger_down == 1 and e.MOVED_DOWN in events) or (danger_wait == 1 and e.WAITED in events):
+            events.append("DEADLY_MOVE")
+        #->eyplosion
+        elif (explosion_left == 1 and e.MOVED_LEFT in events) or (explosion_right == 1 and e.MOVED_RIGHT in events) or (explosion_up== 1 and e.MOVED_UP in events) or (explosion_down== 1 and e.MOVED_DOWN in events):
+            events.append("DEADLY_MOVE")
+
+        #check if move towards a target
+        #->coin and crate
+        elif ( (coin_left == 1 or crate_left == 1 )and e.MOVED_LEFT in events) or ( (coin_right == 1 or crate_right ==1 )and e.MOVED_RIGHT in events) or ( (coin_up == 1  or crate_up==1) and e.MOVED_UP in events) or ( (coin_down == 1 or crate_down ==1) and e.MOVED_DOWN in events):
+            events.append("MOVES_TOWARD_TARGET")
         else:
-            best_dist_new_bombs = np.sum(np.abs(np.subtract(bomb_indices_new, new_pos)),axis=1).min()
-
-        if best_dist_new_bombs > best_dist_old_bombs:
-            events.append("ESCAPE")
-    """
-
-    if np.any(features[13:18]== 0):
-        if features[13] == 1 and e.MOVED_LEFT:
-            events.append("DANGER")
-        if features[14] == 1 and e.MOVED_RIGHT:
-            events.append("DANGER")
-        if features[15] == 1 and e.MOVED_UP:
-            events.append("DANGER")
-        if features[16] == 1 and e.MOVED_DOWN:
-            events.append("DANGER")
-        if features[17] == 1 and e.WAITED:
-            events.append("DANGER")
+            events.append("BAD_MOVE")
 
     return events
 
@@ -395,35 +311,3 @@ def monte_carlo(self, episode_rewards, timestep):
 
     return y
 
-#Gradient update to improvize the weight vectors
-def gradient_update(self, subbatch: List[Transition], action_index: int, round: int):
-    """
-    improve weight vector
-
-    Args:
-        subbatch (List[Transition]): the subbatch for the current action
-        action_index: int: The index of the action used to update the correct
-        position in the weight vector
-    """
-
-    #gradient update hyperparameter
-    alpha = 0.8
-
-    #sum in the gradient update formula
-    sum = 0
-    for transition in subbatch:
-        #temporal difference
-        y = temporal_difference(self, transition[3][transition[4]-1], transition[2])
-
-        #monte carlo
-        #y = monte_carlo(self, transition[3], transition[4])
-        
-        #n_step_td
-        #y = n_step_td(self, transition[3], transition[4], transition[5])
-
-        #other Methods
-        #...
-
-        sum = sum + transition[0] * (y - transition[0].dot(self.weights[action_index]))
-
-    self.weights[action_index] = self.weights[action_index] + (alpha / (len(subbatch) * round)) * sum

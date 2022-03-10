@@ -26,12 +26,12 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.D = 28
-    self.previous_move = np.array([0,0,0,0])
+
+    #feature dimension
+    self.D = 23
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        #self.weights = np.zeros((len(ACTIONS), self.D))
         self.regression_forests = [RandomForestRegressor() for i in range(len(ACTIONS))]
 
     else:
@@ -52,18 +52,11 @@ def act(self, game_state: dict) -> str:
     # todo Exploration vs exploitation
     random_prob = .1
     
-    #if game_state['round'] <= 10:
-    #    random_prob = 0.4
-
     if self.train and (random.random() < random_prob or game_state['round'] < 500):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
     
-    
-    #approximate Q by linear regression
-    #Q = np.matmul(state_to_features(self,game_state), self.weights.T)
-
     #approximate Q by regression forest
     Q =  [self.regression_forests[action_idx_to_test].predict([state_to_features(self, game_state)]) for action_idx_to_test in range(len(ACTIONS))]
 
@@ -71,19 +64,8 @@ def act(self, game_state: dict) -> str:
     action_idx = np.argmax(Q)
     #self.logger.debug("Querying model for action.")
 
-    #Update the previous move(We use it for the features)
-    if action_idx == 0:
-        self.previous_move = np.array([0,0,1,0])
-    elif action_idx == 1:
-        self.previous_move = np.array([0,1,0,0])
-    elif action_idx == 2:
-        self.previous_move = np.array([0,0,0,1])
-    elif action_idx == 3:
-        self.previous_move = np.array([1,0,0,0])
-
     #print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
-    #return "WAIT"
 
 def state_to_features(self, game_state: dict) -> np.array:
     """
@@ -99,10 +81,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     :param game_state:  A dictionary describing the current game board.
     :return: np.array
     """
-    ## This is the dict before the game begins and after it ends
-    #if game_state is None:
-    #    return None
-    
+
     features = np.zeros(self.D)
 
     field = np.array(game_state['field'])
@@ -112,13 +91,16 @@ def state_to_features(self, game_state: dict) -> np.array:
     explosion_map = np.array(game_state['explosion_map'])
     _, _, bomb, (x, y) = game_state['self']
 
-    #print(field)
+    explosion_indices = np.array(np.where(explosion_map > 0)).T
+    crate_in_the_near = check_for_crates(self, np.array([x,y]), field.copy())
+    escape_possible, possible_escape_directions = check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs)
 
-    #We will normalize all features to [0,1]
-    
+    coin_distance = np.inf
+    crate_distance = np.inf
+
     #the next feature is gonna be the direction we need to move to get to the next coin the fastest
     if len(coins) != 0:
-        features[0:4] = breath_first_search(field.copy(), np.array([x,y]), coins)
+        features[0:4], coin_distance = breath_first_search(field.copy(), np.array([x,y]), coins, bombs , explosion_indices)
     else:
        features[0:4] = np.array([0,0,0,0])
 
@@ -127,44 +109,54 @@ def state_to_features(self, game_state: dict) -> np.array:
     crate_indices = np.array(np.where(field == 1)).T
 
     if crate_indices.size != 0:
-       features[4:8] = breath_first_search(field.copy(), np.array([x,y]), crate_indices)
+       features[4:8], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices)
     else:
         features[4:8] = np.array([0,0,0,0])
 
     #the next feature is gonna be if there is a crate in the near and we can find an escape route, so that it is sensible to drop a bomb
-    explosion_indices = np.array(np.where(explosion_map > 0)).T
-    crate_in_the_near, number_near_crates = check_for_crates(self, np.array([x,y]), field.copy())
-    escape_possible, possible_escape_directions = check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs)
-
     if crate_in_the_near:
-        #print("crate is in the near")
-
         if escape_possible:
-            #print("escape is possible")
             features[8] = 1
     
-    #directions in which we should escape if we could plant a bomb here
-    features[9:13] = possible_escape_directions
-
-    features[9:13] = np.array([0,0,0,0])
-
-    #the next feature is gonna be the amount of bombs that are in a certain radius of the player
-    # weighted by their distance and the time till they explode
-    #features[13:18] = search_for_bomb_in_radius(field.copy(), np.array([x,y]), bombs, 5)
-
-    features[13:18] = danger(self, bombs, field, explosion_indices, x, y)
+    features[9:14] =  danger(self, bombs, field, explosion_indices, x, y)
 
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[18:22] = (np.array([explosion_map[x-1,y], explosion_map[x+1,y], explosion_map[x,y-1], explosion_map[x,y+1]])) / s.EXPLOSION_TIMER
-
+    features[14:18] = np.array([ int(explosion_map[x-1,y]!= 0), int(explosion_map[x+1,y]!= 0), int(explosion_map[x,y-1]!=0), int(explosion_map[x,y+1] != 0)  ]) 
     
-    features[22:26] = np.array([ int(field[x-1,y] == 0) , int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
-
     #the next feature is gonna show if a bomb action is possible
-    features[26] = int(bomb)
+    features[18] = int(bomb)
 
-    #the next feature is gonna be how many crates are in our bomb radius right now
-    features[27] = number_near_crates
+    features[19:23] = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
+
+    coin_weight = coin_distance 
+    crate_weight = crate_distance
+    
+    if coin_weight <= 3 * crate_weight:
+        #print("a")
+        features[4:8] = np.array([0,0,0,0])
+    else:
+        #print("b")
+        features[0:4] = np.array([0,0,0,0])
+    
+
+
+    """
+    print("direction to coin")
+    print(features[0:4])
+    print("direction to crate")
+    print(features[4:8])
+    print("bomb placing is good")
+    print(features[8])
+    print("danger")
+    print(features[9:14])
+    print("explosion")
+    print(features[14:18])
+    print("valid move")
+    print(features[19:23])
+    print("bomb can be dropped")
+    print(features[18])
+    print("  ")
+    """
 
     return features
 
@@ -179,7 +171,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     '''
 
 #perform a breadth first sreach to get the direction to nearest coin
-def breath_first_search(field: np.array, starting_point: np.array, targets:np.array)->np.array: 
+def breath_first_search(field: np.array, starting_point: np.array, targets:np.array, bombs , explosion_indices)->np.array: 
     """
     :param: field: Describes the current copied game board. 0 stays for free tile, 1 for stone walls and -1 for crates
             starting_point: The current position of the player. The position is a 1 dimensional value and the flattend version of the 2D field
@@ -189,6 +181,14 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
     #update the field so that the coins are included
     for target in targets:
         field[target[0],target[1]] = 2
+
+    #update the field so that the bombs are included
+    for bomb in bombs:
+        field[bomb[0][0],bomb[0][1]] = -1
+
+    #update the field so that the explosions are included
+    for explosion_index in explosion_indices:
+        field[explosion_index[0], explosion_index[1]] = -1
     
     #Use this list to get backtrace the path from the nearest coin to the players position to get the direction
     parent = np.ones(s.COLS*s.ROWS) * -1
@@ -244,26 +244,29 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
         #increase counter to get the next tile from the queue
         counter = counter + 1
     
-    #get the path from the nearest coin to the player by accessing the parent list
-    path = [target]
-    tile = target
-    
-    while tile != start:
-        tile = int(parent[tile])
-        path.append(tile)
+    if target is not None:
+        #get the path from the nearest coin to the player by accessing the parent list
+        path = [target]
+        tile = target
+        
+        while tile != start:
+            tile = int(parent[tile])
+            path.append(tile)
 
-    path = np.flip(path)
+        path = np.flip(path)
 
-    path_length = len(path)
+        path_length = len(path)
 
-    #get the second tile of the path which indicates the direction to the nearest coin
-    next_position = path[1]
-    next_position_x = path[1] % s.COLS
-    next_position_y = path[1] // s.COLS
+        #get the second tile of the path which indicates the direction to the nearest coin
+        next_position = path[1]
+        next_position_x = path[1] % s.COLS
+        next_position_y = path[1] // s.COLS
 
-    direction = [int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])] 
+        direction = [int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])] 
 
-    return direction
+        return direction, path_length -1
+    else:
+        return np.array([0,0,0,0]), np.inf
 
 
 #perform a breadth first sreach that searches for bombs in a given radius
@@ -392,8 +395,6 @@ def search_for_bomb_in_radius(field: np.array, starting_point: np.array, bombs: 
 def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
     x, y = agent_position
     check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
-    any_chest_found = False
-    chest_counter = 0
 
     if check_right:
         for i in range(1,4):
@@ -401,8 +402,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break 
 
             if field[x+i,y] == 1:
-                any_chest_found = True
-                chest_counter = chest_counter + 1
+                return True
 
     if check_left:
         for i in range(1,4):
@@ -410,8 +410,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break
 
             if field[x-i,y] == 1:
-                any_chest_found = True
-                chest_counter = chest_counter + 1
+                return True 
 
     if check_down:
         for i in range(1,4):
@@ -419,8 +418,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break
 
             if field[x,y+i] == 1:
-                any_chest_found = True
-                chest_counter = chest_counter +1
+                return True 
 
     if check_up:
         for i in range(1,4):
@@ -428,13 +426,9 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
                 break 
             
             if field[x,y-i] == 1:
-                any_chest_found = True
-                chest_counter = chest_counter + 1
-    
-    chest_counter = chest_counter / 9 #since 9 is the maximum number of chests you can destroy with one bomb
-                                      #(appart from sitting in the middle of 12 bombs which is not a sensible case of the game)
+                return True 
 
-    return any_chest_found, chest_counter
+    return False
 
 def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array, bombs: list) -> Tuple[bool, np.array]:
     """Tries to find an escape route after setting a bomb in the near of a crate. If there is an escape route
@@ -644,20 +638,17 @@ def checking(self, field: np.array, starting_point: np.array, explosion_indices:
 def danger(self, bombs, field, explosion_indices, x, y):
     test = np.array([0,0,0,0,0])
     
-    """
+    
+    #update the field so that the bombs are included
     for bomb in bombs:
         field[bomb[0][0],bomb[0][1]] = -1
 
-    #first check if steps in the different directions are possible
-    #or if there are blocking objects
-    #free fields have label 0
-    free_fields = np.array([ int(field[x-1,y] == 0) , int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0), 1])
-    test = np.min(np.vstack((test, free_fields)), axis=0)
-    """
+    #update the field so that the explosions are included
+    for explosion_index in explosion_indices:
+        field[explosion_index[0], explosion_index[1]] = -1
 
     #first check if there are bombs
     if len(bombs) != 0:
-        #print("There are bombs in the field")
         #collect the number of positions and bombs
         bomb_positions= np.zeros((len(bombs),2))
         bomb_countdowns = np.zeros(len(bombs))
@@ -670,8 +661,6 @@ def danger(self, bombs, field, explosion_indices, x, y):
         x_near =np.where( np.logical_and( np.abs(bomb_positions[:, 0] - x) <=1 , np.abs(bomb_positions[:, 1] - y) <=4 ) )
         y_near =np.where( np.logical_and( np.abs(bomb_positions[:, 1] - y) <=1 , np.abs(bomb_positions[:, 0] - x) <=4 ) )
 
-        #print("count")
-        #print(bomb_countdowns)
         bomb_x = bomb_positions[x_near]
         bomb_x_count_down = bomb_countdowns[x_near]
 
@@ -683,15 +672,10 @@ def danger(self, bombs, field, explosion_indices, x, y):
 
         #check if there are bombs in the near
         if near.shape[0] > 0:
-            #print("There are bombs in the near")
-            #print(bomb_x)
-            #print(bomb_y)
 
-            #print("There are bombs in the near")
             for i,pos in enumerate(bomb_x) :
 
                 f = field.copy()
-                #print(f.T)
 
                 index = np.where(field == 0)
                 f[index] = 10
@@ -719,8 +703,6 @@ def danger(self, bombs, field, explosion_indices, x, y):
                         #update the distance
                         flatten =  j * s.COLS + int(pos[0])
                         distance[flatten] = j - int(pos[1])
-            
-                #print(np.reshape(distance, (s.ROWS, s.COLS)))
 
                 #check for escape
                 if (f[x, y] != 10) and test[4] != 1:
@@ -864,4 +846,3 @@ def danger(self, bombs, field, explosion_indices, x, y):
                         #print("You can move left")
     
     return test
-   
