@@ -16,11 +16,12 @@ ACTION_TO_INT = {'UP':0, 'RIGHT' : 1 , 'DOWN': 2, 'LEFT': 3, 'WAIT':4, 'BOMB': 5
 
 FEATURES_TO_INT = {"DIRECTION_TO_COIN": [0,1,2,3],
                    "DIRECTION_TO_CRATE": [4,5,6,7],
-                   "GOOD_BOMB_SPOT": 8,
-                   "DANGEROUS_ACTION": [9,10,11,12,13],
-                   "EXPLOSION_IN_THE_NEAR": [14,15,16,17],
-                   "VALID_MOVES": [18,19,20,21],
-                   "BOMB_ACTIVE": 22}
+                   "DIRECTION_TO_OPPONENT": [8,9,10,11],
+                   "GOOD_BOMB_SPOT": 12,
+                   "DANGEROUS_ACTION": [13,14,15,16,17],
+                   "EXPLOSION_IN_THE_NEAR": [18,19,20,21],
+                   "VALID_MOVES": [22,23,24,25],
+                   "BOMB_ACTIVE": 26}
 
 
 Transition = namedtuple('Transition',
@@ -188,9 +189,9 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        #Made a move thats not in free moves (features[18:22])
         e.INVALID_ACTION: -10,
-        e.KILLED_SELF: -500,
+        #e.KILLED_SELF: -500,
+        e.GOT_KILLED: -500,
         'LIFE_SAVING_MOVE': 20,
         'GOOD_BOMB_PLACEMENT': 10,
         'BAD_BOMB_PLACEMENT': -50,
@@ -253,11 +254,12 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
             events.append("BAD_BOMB_PLACEMENT")
     else:
         valid_list = features[FEATURES_TO_INT['VALID_MOVES']].copy()
-        valid_list[ np.where( np.logical_or(features[9:13] == 1, features[14:18] == 1) ) ] = 0
+        valid_list[ np.where( np.logical_or(features[FEATURES_TO_INT['DANGEROUS_ACTION']][0:4] == 1, features[FEATURES_TO_INT['EXPLOSION_IN_THE_NEAR']] == 1) ) ] = 0
 
         explosion_left , explosion_right, explosion_up, explosion_down = features[FEATURES_TO_INT['EXPLOSION_IN_THE_NEAR']]
         coin_left , coin_right, coin_up, coin_down = features[FEATURES_TO_INT['DIRECTION_TO_COIN']]
         crate_left , crate_right, crate_up, crate_down = features[FEATURES_TO_INT['DIRECTION_TO_CRATE']]
+        opponent_left, opponent_right, opponent_up, opponent_down = features[FEATURES_TO_INT['DIRECTION_TO_OPPONENT']]
         
         if np.all(valid_list == 0) and e.WAITED in events:
             events.append("WAITING_ONLY_OPTION")
@@ -272,7 +274,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
         #check if move towards a target
         #->coin and crate
-        elif ( (coin_left == 1 or crate_left == 1 )and e.MOVED_LEFT in events) or ( (coin_right == 1 or crate_right ==1 )and e.MOVED_RIGHT in events) or ( (coin_up == 1  or crate_up==1) and e.MOVED_UP in events) or ( (coin_down == 1 or crate_down ==1) and e.MOVED_DOWN in events):
+        elif ( (coin_left == 1 or crate_left == 1 or opponent_left == 1)and e.MOVED_LEFT in events) or ( (coin_right == 1 or crate_right ==1 or opponent_right == 1)and e.MOVED_RIGHT in events) or ( (coin_up == 1  or crate_up==1 or opponent_up == 1) and e.MOVED_UP in events) or ( (coin_down == 1 or crate_down ==1 or opponent_down == 1) and e.MOVED_DOWN in events):
             events.append("MOVES_TOWARD_TARGET")
         else:
             events.append("BAD_MOVE")
