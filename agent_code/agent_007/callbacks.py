@@ -364,6 +364,140 @@ def check_for_opponents(self, agent_position: np.array , field: np.array, oppone
 
     return False
 
+def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, steps_passed):
+    x, y = agent_position
+    check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
+
+    bomb_found = False
+    min_cooldown = np.inf
+
+    for bomb in bombs:
+        field[bomb[0][0], bomb[0][1]] = 10 + bomb[1] - steps_passed
+
+    if check_right:
+        for i in range(1,4):
+            if x+i >= s.COLS:
+                break 
+
+            if field[x+i,y] >= 10:
+                bomb_found = True
+                min_cooldown = min(min_cooldown, field[x+i,y] - 10)
+                
+
+    if check_left and min_cooldown != 0:
+        for i in range(1,4):
+            if x-i < 0:
+                break
+
+            if field[x-i,y] >= 10:
+                bomb_found = True
+                min_cooldown = min(min_cooldown, field[x-i,y] - 10)
+
+    if check_down and min_cooldown != 0:
+        for i in range(1,4):
+            if y+i >= s.ROWS:
+                break
+
+            if field[x,y+i] >= 10:
+                bomb_found = True
+                min_cooldown = min(min_cooldown, field[x,y+i] - 10)
+
+    if check_up and min_cooldown != 0:
+        for i in range(1,4):
+            if y-i < 0:
+                break 
+            
+            if field[x,y-i] >= 10:
+                bomb_found = True
+                min_cooldown = min(min_cooldown, field[x,y-i] - 10) 
+
+    return bomb_found, min_cooldown
+
+"""
+
+def new_danger(self, starting_point, bombs, field, explosion_map, x, y, opponents, max_steps):
+     #update the field so that the bombs are included
+    updated_field = field.copy()
+
+    #update the field so that opponents are included
+    for opponent in opponents:
+        updated_field[opponent[0],opponent[1]] = -1
+    
+    for bomb in bombs:
+        updated_field[bomb[0][0],bomb[0][1]] = -1
+
+    steps_passed = 0
+
+    parent = np.ones(s.COLS*s.ROWS) * -1
+    start = starting_point[1] * s.COLS + starting_point[0]
+    parent[start] = start
+    path_queue = np.array([start])
+    counter = 0
+
+    while counter < len(path_queue):
+        current_position = path_queue[counter]
+
+        #update field to include explosions since explosions might have passed and new explosions might have spawned
+        #new explosions
+        for bomb in bombs:
+            if bomb[1] - steps_passed < 0:
+                updated_field[bomb[0][0]+1,bomb[0][1]] = -1
+                updated_field[bomb[0][0]+2,bomb[0][1]] = -1
+                updated_field[bomb[0][0]+3,bomb[0][1]] = -1
+                updated_field[bomb[0][0]-1,bomb[0][1]] = -1
+                updated_field[bomb[0][0]-2,bomb[0][1]] = -1
+                updated_field[bomb[0][0]-3,bomb[0][1]] = -1
+                updated_field[bomb[0][0],bomb[0][1]+1] = -1
+                updated_field[bomb[0][0],bomb[0][1]+2] = -1
+                updated_field[bomb[0][0],bomb[0][1]+3] = -1
+                updated_field[bomb[0][0],bomb[0][1]-1] = -1
+                updated_field[bomb[0][0],bomb[0][1]-2] = -1
+                updated_field[bomb[0][0],bomb[0][1]-3] = -1
+
+        #old explosions that are gone
+
+        #get the 2D coordinates
+        x = current_position % s.COLS
+        y = current_position // s.ROWS
+
+        bombs_found, min_cooldown = check_near_bombs(self, [x,y], field.copy(), bombs, steps_passed)
+        #this move is 100% save
+        if not bombs_found:
+            return False
+        
+        #this path is 100% not save, try a new path
+        if min_cooldown == 0:
+            continue
+    
+        #left from the current position. 
+        if current_position % s.COLS != 0 and field[x-1,y] != -1 and field[x-1,y] != 1 and field[x-1,y]!= -1 and parent[current_position-1] == -1:
+            path_queue = np.append(path_queue, current_position-1)
+            parent[current_position-1] = current_position
+        
+
+        #right from the current position
+        if current_position % s.COLS != s.COLS-1 and field[x+1,y] != -1 and field[x+1,y]!=1 and field[x+1,y]!= -1 and parent[current_position+1] == -1:
+            path_queue = np.append(path_queue, current_position+1)
+            parent[current_position+1] = current_position
+        
+        #up from the current position
+        if current_position >= s.COLS and field[x,y-1] != -1 and field[x, y-1]!= 1 and field[x,y-1]!= -1 and parent[current_position-s.COLS] == -1:
+            path_queue = np.append(path_queue,current_position-s.COLS)
+            parent[current_position-s.COLS] = current_position
+        
+ 
+        #down from the current position
+        if y < s.ROWS-1 and field[x,y+1] != -1 and field[x, y+1]!= 1 and field[x,y+1] != -1 and parent[current_position+s.COLS] == -1:
+            path_queue = np.append(path_queue,current_position+s.COLS)
+            parent[current_position+s.COLS] = current_position
+        
+
+        steps_passed = steps_passed + 1
+
+    return True
+        
+"""
+
 def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array, bombs: list, opponents: np.array) -> Tuple[bool, np.array]:
     """Tries to find an escape route after setting a bomb in the near of a crate. If there is an escape route
     then the feature flag will be set to 1 otherwise to 0 
