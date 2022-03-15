@@ -28,7 +28,7 @@ def setup(self):
     """
 
     #feature dimension
-    self.D = 27
+    self.D = 49
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
@@ -52,7 +52,7 @@ def act(self, game_state: dict) -> str:
     # todo Exploration vs exploitation
     random_prob = .1
     
-    if self.train and (random.random() < random_prob or game_state['round'] < 500):
+    if self.train and (random.random() < random_prob or game_state['round'] < 10):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
@@ -98,81 +98,17 @@ def state_to_features(self, game_state: dict) -> np.array:
 
     explosion_indices = np.array(np.where(explosion_map > 0)).T
 
-    coin_distance = np.inf
-    crate_distance = np.inf
-    opponent_distance = np.inf
+    distances_around_agent = np.empty((7, 7))
+    distances_around_agent.fill(100)
 
-    #the next feature is gonna be the direction we need to move to get to the next coin the fastest
     if len(coins) != 0:
-        features[0:4], coin_distance = breath_first_search(field.copy(), np.array([x,y]), coins, bombs , explosion_indices, others_position)
-    else:
-       features[0:4] = np.array([0,0,0,0])
-
-    #the next feature is gonna be the direction we need to move to get to the next crate the fastest
-    crate_indices = np.array(np.where(field == 1)).T
-
-    if crate_indices.size != 0:
-       features[4:8], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
-    else:
-        features[4:8] = np.array([0,0,0,0])
-
-    #the next feature is gonna be the direction we need to move to get to the next oponnent the fastest
-    if len(others_position) != 0:
-        features[8:12], opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
-    else:
-        features[8:12] = np.array([0,0,0,0])
-
-    #the next feature is gonna be if there is a crate or enemy in the near and we can find an escape route, so that it is sensible to drop a bomb
-    if check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs, others_position)[0]:
-        if check_for_crates(self, np.array([x,y]), field.copy()) or check_for_opponents(self, np.array([x,y]), field.copy(), others_position):
-            features[12] = 1
+        coin_distance_map = build_coin_distance_map(self, field, coins)
+        for i in range(7):
+            for j in range(7):
+                if x-3+i >=0 and x-3+i < s.COLS and y-3+j >=0 and y-3+j < s.ROWS:
+                    distances_around_agent[i,j] = coin_distance_map[x-3+i][y-3+j]
     
-    features[13:18] =  danger(self, bombs, field, explosion_indices, x, y, others_position)
-
-    #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[18:22] = np.array([ int(explosion_map[x-1,y]!= 0), int(explosion_map[x+1,y]!= 0), int(explosion_map[x,y-1]!=0), int(explosion_map[x,y+1] != 0)  ]) 
-
-    #valid moves
-    features[22:26] = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
-
-    #the next feature is gonna show if a bomb action is possible
-    features[26] = int(bomb)
-
-    coin_weight = coin_distance * 1.5
-    crate_weight = crate_distance * 4
-    opponent_weight = opponent_distance 
-    
-    if opponent_weight <= coin_weight and opponent_weight <= crate_weight:
-        features[0:4] = np.array([0,0,0,0])
-        features[4:8] = np.array([0,0,0,0])
-    elif coin_weight <= crate_weight:
-        features[4:8] = np.array([0,0,0,0])
-        features[8:12] = np.array([0,0,0,0])
-    else:
-        features[0:4] = np.array([0,0,0,0])
-        features[8:12] = np.array([0,0,0,0])
-    
-
-    """
-    print("direction to coin")
-    print(features[0:4])
-    print("direction to crate")
-    print(features[4:8])
-    print("bomb placing is good")
-    print(features[8])
-    print("danger")
-    print(features[9:14])
-    print("explosion")
-    print(features[14:18])
-    print("valid move")
-    print(features[19:23])
-    print("bomb can be dropped")
-    print(features[18])
-    print("  ")
-    """
-
-    return features
-
+    features[0:49] = distances_around_agent.flatten()
 
     ''' For example, you could construct several channels of equal shape, ...
     channels = []
@@ -181,7 +117,65 @@ def state_to_features(self, game_state: dict) -> np.array:
     stacked_channels = np.stack(channels)
     # and return them as a vector
     return stacked_channels.reshape(-1)
+
     '''
+
+    return features
+
+    
+def build_coin_distance_map(self, field: np.array, coin_positions: np.array) -> np.array:
+    coin_distance_map = np.empty((s.COLS, s.ROWS))
+    coin_distance_map.fill(100)
+
+    #for every coin update distance map
+    for starting_point in coin_positions:
+        #array for visited points
+        visited = np.zeros((s.COLS, s.ROWS))
+
+        #Queue for visiting the tiles that contains their position and their distance to the coin
+        path_queue = deque(maxlen=s.COLS*s.ROWS)
+        path_queue.append((starting_point, 0))
+
+        visited[starting_point[0]][starting_point[1]] = 1
+
+        #Visit tiles until a tile contains a coin
+        while path_queue:
+            current_position, distance = path_queue.popleft()
+            if distance > 15:
+                break
+            x = current_position[0]
+            y = current_position[1]
+
+            #update coin distance map
+            coin_distance_map[x][y] = min(coin_distance_map[x][y], distance)
+            
+            #now visit all neighbours if there is no wall and we did not visit them yet
+            #since there is a wall around the whole field we do not need to check if we go
+            #out of range of the collums and rows
+            #left from the current position. 
+            next_pos_x = x-1
+            if field[next_pos_x][y]!= -1 and visited[next_pos_x][y] == 0:
+                path_queue.append(([next_pos_x, y], distance+1))
+                visited[next_pos_x][y] = 1
+
+            #right from the current position
+            next_pos_x = x+1
+            if field[next_pos_x][y] != -1 and visited[next_pos_x][y] == 0:
+                path_queue.append(([next_pos_x,y], distance+1))
+                visited[next_pos_x][y] = 1
+
+            #up from the current position
+            next_pos_y = y-1
+            if field[x][next_pos_y] != -1 and visited[x][next_pos_y] == 0:
+                path_queue.append(([x, next_pos_y], distance+1))
+                visited[x][next_pos_y] = 1
+
+            #down from the current position
+            next_pos_y = y+1
+            if field[x][next_pos_y] != -1 and visited[x][next_pos_y] == 0:
+                path_queue.append(([x, next_pos_y], distance+1))
+                visited[x][next_pos_y] = 1
+    return coin_distance_map
 
 #perform a breadth first sreach to get the direction to nearest coin
 def breath_first_search(field: np.array, starting_point: np.array, targets:np.array, bombs , explosion_indices, opponents)->np.array: 
@@ -283,7 +277,7 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
 
         return direction, path_length -1
     else:
-        return np.array([0,0,0,0]), np.inf
+        return np.array([0,0,0,0]), 100
 
 def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
     x, y = agent_position
@@ -369,7 +363,7 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
     check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
 
     bomb_found = False
-    min_cooldown = np.inf
+    min_cooldown = 100
 
     for bomb in bombs:
         field[bomb[0][0], bomb[0][1]] = 10 + bomb[1] - steps_passed
