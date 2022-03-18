@@ -144,7 +144,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
 
     #only start fitting after we have tried enough random actions
-    if last_game_state['round'] < 9:
+    if last_game_state['round'] < 499:
         return
 
     #random subset of experience buffer
@@ -164,7 +164,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         #the learning rate.
         if len(subbatch) != 0:
             #calculate the responses
-            if last_game_state['round'] == 9 :
+            if last_game_state['round'] == 499 :
                 response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
             else:
                 #continue with monte carlo
@@ -190,8 +190,15 @@ def reward_from_events(self, events: List[str]) -> int:
 
     game_rewards = {
         e.INVALID_ACTION: -10,
-        e.COIN_COLLECTED: 40,
-        "MOVE_TOWARDS_COIN": 5,
+        #e.KILLED_SELF: -500,
+        e.GOT_KILLED: -500,
+        'LIFE_SAVING_MOVE': 20,
+        'GOOD_BOMB_PLACEMENT': 10,
+        'BAD_BOMB_PLACEMENT': -50,
+        'DEADLY_MOVE': -50,
+        'MOVES_TOWARD_TARGET': 5,
+        'WAITING_ONLY_OPTION': 10,
+        'BAD_MOVE': -4,
     }
     reward_sum = 0
     for event in events:
@@ -204,8 +211,7 @@ def reward_from_events(self, events: List[str]) -> int:
     return reward_sum
 
 def append_custom_events(self,old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
-    old_features = state_to_features(self,old_game_state)
-    new_features = state_to_features(self, new_game_state)
+    features = state_to_features(self,old_game_state)
     """
     Appends all our custom events to the events list
     so we can calculate the total rewards out of these
@@ -221,11 +227,57 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     _, _, _, old_pos = old_game_state['self']
     _, _, _, new_pos =  new_game_state['self']
 
-    old_coin_distance_around_player = old_features[0:49].reshape((7,7))
-    new_coin_distance_around_player = new_features[0:49].reshape((7,7))
+    danger_left , danger_right, danger_up, danger_down , danger_wait = features[FEATURES_TO_INT['DANGEROUS_ACTION']]
 
-    if old_coin_distance_around_player[3][3] > new_coin_distance_around_player[3][3]:
-        events.append("MOVE_TOWARDS_COIN")
+    if e.INVALID_ACTION in events:
+        return events
+
+    #check, if waiting is dangerous we need to move 
+    if danger_wait == 1: 
+        #check if did a life saving move
+        if danger_left == 0 and e.MOVED_LEFT in events:
+            events.append("LIFE_SAVING_MOVE")
+        elif danger_right == 0 and e.MOVED_RIGHT in events:
+            events.append("LIFE_SAVING_MOVE")
+        elif danger_up == 0 and e.MOVED_UP in events:
+            events.append("LIFE_SAVING_MOVE")
+        elif danger_down == 0 and e.MOVED_DOWN in events:
+            events.append("LIFE_SAVING_MOVE")
+        else: 
+            events.append("DEADLY_MOVE")
+
+    elif e.BOMB_DROPPED in events:
+        #check if dropped the bomb correctly
+        if features[FEATURES_TO_INT['GOOD_BOMB_SPOT']] == 1:
+            events.append("GOOD_BOMB_PLACEMENT")
+        else:
+            events.append("BAD_BOMB_PLACEMENT")
+    else:
+        valid_list = features[FEATURES_TO_INT['VALID_MOVES']].copy()
+        valid_list[ np.where( np.logical_or(features[FEATURES_TO_INT['DANGEROUS_ACTION']][0:4] == 1, features[FEATURES_TO_INT['EXPLOSION_IN_THE_NEAR']] == 1) ) ] = 0
+
+        explosion_left , explosion_right, explosion_up, explosion_down = features[FEATURES_TO_INT['EXPLOSION_IN_THE_NEAR']]
+        coin_left , coin_right, coin_up, coin_down = features[FEATURES_TO_INT['DIRECTION_TO_COIN']]
+        crate_left , crate_right, crate_up, crate_down = features[FEATURES_TO_INT['DIRECTION_TO_CRATE']]
+        opponent_left, opponent_right, opponent_up, opponent_down = features[FEATURES_TO_INT['DIRECTION_TO_OPPONENT']]
+        
+        if np.all(valid_list == 0) and e.WAITED in events:
+            events.append("WAITING_ONLY_OPTION")
+        
+        #check if performed a deadly move 
+        #->bomb
+        elif (danger_left == 1 and e.MOVED_LEFT in events) or (danger_right == 1 and e.MOVED_RIGHT in events) or (danger_up == 1 and e.MOVED_UP in events) or (danger_down == 1 and e.MOVED_DOWN in events) or (danger_wait == 1 and e.WAITED in events):
+            events.append("DEADLY_MOVE")
+        #->eyplosion
+        elif (explosion_left == 1 and e.MOVED_LEFT in events) or (explosion_right == 1 and e.MOVED_RIGHT in events) or (explosion_up== 1 and e.MOVED_UP in events) or (explosion_down== 1 and e.MOVED_DOWN in events):
+            events.append("DEADLY_MOVE")
+
+        #check if move towards a target
+        #->coin and crate
+        elif ( (coin_left == 1 or crate_left == 1 or opponent_left == 1)and e.MOVED_LEFT in events) or ( (coin_right == 1 or crate_right ==1 or opponent_right == 1)and e.MOVED_RIGHT in events) or ( (coin_up == 1  or crate_up==1 or opponent_up == 1) and e.MOVED_UP in events) or ( (coin_down == 1 or crate_down ==1 or opponent_down == 1) and e.MOVED_DOWN in events):
+            events.append("MOVES_TOWARD_TARGET")
+        else:
+            events.append("BAD_MOVE")
 
     return events
 
