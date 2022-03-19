@@ -21,7 +21,8 @@ FEATURES_TO_INT = {"COIN_DISTANCE": np.arange(81),
                     "CRATE_COUNT": np.arange(324,405),
                     "BOMB": 405,
                     "FIELD": np.arange(406,487),
-                    "ESCAPE_POSSIBLE": 487
+                    "ESCAPE_POSSIBLE": 487,
+                    "DANGEROUS_MOVE": np.arange(488,493)
                     }
 
 
@@ -193,15 +194,15 @@ def reward_from_events(self, events: List[str]) -> int:
         e.INVALID_ACTION: -10,
         e.COIN_COLLECTED: 20,
         e.CRATE_DESTROYED: 15,
-        e.GOT_KILLED: -80,
+        e.COIN_FOUND: 15,
+        e.GOT_KILLED: -100,
         e.KILLED_OPPONENT: 100,
-        "LIFE_SAVING_MOVE": 30,
-        "DEADLY_MOVE": -60,
-        "OK_BOMB": 5,
-        "GOOD_BOMB": 15,
+        "LIFE_SAVING_MOVE": 40,
+        "DEADLY_MOVE": -100,
+        "OK_BOMB": 10,
+        "GOOD_BOMB": 20,
         "VERY_GOOD_BOMB": 30,
         "SENSELESS_BOMB": -50,
-        #"NOTHING_GOOD_HAPPENED": -1,
     }
     reward_sum = 0
     for event in events:
@@ -236,6 +237,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     crate_counts = np.array([features[idx] for idx in FEATURES_TO_INT['CRATE_COUNT']]).reshape((9,9))
     opponents = np.array([features[idx] for idx in FEATURES_TO_INT['OPPONENTS']]).reshape((9,9))
     escape_possible = np.array(features[FEATURES_TO_INT['ESCAPE_POSSIBLE']])
+    dangerous_actions = features[FEATURES_TO_INT['DANGEROUS_MOVE']]
 
     if bomb_timers[4][4] == 1:
         if e.MOVED_LEFT in events and  bomb_timers[3][4] != 1:
@@ -258,11 +260,19 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
             events.append("GOOD_BOMB")
         elif crate_counts[4][4] >= 3:
             events.append("VERY_GOOD_BOMB")
-        elif np.all(opponents == 0):
+        elif np.all(opponents == 0) and crate_counts[4][4] == 0:
             events.append("SENSELESS_BOMB")
-
-    if not e.COIN_COLLECTED in events and not e.CRATE_DESTROYED in events and not e.KILLED_OPPONENT in events:
-        events.append("NOTHING_GOOD_HAPPENED")
+    
+    if e.MOVED_LEFT in events and dangerous_actions[0] == 1:
+        events.append("DEADLY_MOVE")
+    elif e.MOVED_RIGHT in events and dangerous_actions[1] == 1:
+        events.append("DEADLY_MOVE")
+    elif e.MOVED_UP in events and dangerous_actions[2] == 1:
+        events.append("DEADLY_MOVE")
+    elif e.MOVED_DOWN in events and dangerous_actions[3] == 1:
+        events.append("DEADLY_MOVE")
+    elif e.WAITED in events and dangerous_actions[4] == 1:
+        events.append("DEADLY_MOVE")
 
     return events
 
