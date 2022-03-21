@@ -32,7 +32,7 @@ def setup(self):
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        self.regression_forests = [RandomForestRegressor() for i in range(len(ACTIONS))]
+        self.regression_forests = [RandomForestRegressor(n_estimators=5) for i in range(len(ACTIONS))]
 
     else:
         self.logger.info("Loading model from saved state.")
@@ -52,7 +52,7 @@ def act(self, game_state: dict) -> str:
     # todo Exploration vs exploitation
     random_prob = .1
     
-    if self.train and (random.random() < random_prob or game_state['round'] < 500):
+    if self.train and (random.random() < random_prob or game_state['round'] < 100):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
@@ -209,7 +209,7 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
 
     #check if the player is already in a coin field
     if field[starting_point[0],starting_point[1]] == 2:
-        return np.array([0,0,0,0])
+        return np.array([0,0,0,0]),0
     
     path_queue = np.array([start])
     counter = 0

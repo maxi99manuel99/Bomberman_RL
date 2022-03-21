@@ -144,7 +144,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
 
     #only start fitting after we have tried enough random actions
-    if last_game_state['round'] < 499:
+    if last_game_state['round'] < 99:
         return
 
     #random subset of experience buffer
@@ -164,7 +164,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         #the learning rate.
         if len(subbatch) != 0:
             #calculate the responses
-            if last_game_state['round'] == 499 :
+            if last_game_state['round'] == 99 :
                 response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
             else:
                 #continue with monte carlo
@@ -285,7 +285,6 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
 #TD
 def temporal_difference(self, reward, next_state):
-    print("d")
     y = reward
     if next_state is not None:
         #y = y + GAMMA * np.matmul(next_state, self.weights.T).max()

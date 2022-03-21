@@ -146,7 +146,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
 
     #only start fitting after we have tried enough random actions
-    if last_game_state['round'] < 499:
+    if last_game_state['round'] < 99:
         return
 
     #random subset of experience buffer
@@ -166,14 +166,17 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         #the learning rate.
         if len(subbatch) != 0:
             #calculate the responses
-            if last_game_state['round'] == 499 :
+            if last_game_state['round'] == 99 :
                 response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
-            else:
+            else:   
                 #continue with monte carlo
                 response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
 
                 #temporal difference 
                 #response = np.array([temporal_difference(self, transition[3][transition[4]-1], transition[2]) for transition in subbatch])
+
+                #sarsa 
+                #response = np.array([sarsa(self,transition[3][transition[4]-1], transition[2], transition[1]) for transition in subbatch], dtype = object)
 
             #train the forest
             self.regression_forests[ACTION_TO_INT[action]].fit(subbatch_old_states, response)
@@ -190,26 +193,28 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
 
+
     game_rewards = {
-        e.INVALID_ACTION: -10,
-        #e.KILLED_SELF: -500,
-        e.GOT_KILLED: -500,
+        e.INVALID_ACTION: -20,
+        e.GOT_KILLED: -200,
         'LIFE_SAVING_MOVE': 20,
         'GOOD_BOMB_PLACEMENT': 10,
-        'BAD_BOMB_PLACEMENT': -50,
-        'DEADLY_MOVE': -50,
-        'MOVES_TOWARD_TARGET': 5,
-        'WAITING_ONLY_OPTION': 10,
-        'BAD_MOVE': -4,
+        'BAD_BOMB_PLACEMENT': -100,
+        'DEADLY_MOVE': -100,
+        'MOVES_TOWARD_TARGET': 3,
+        'WAITING_ONLY_OPTION': 20,
+        'BAD_MOVE': -1,
     }
+    #print("All rewards for this action")
     reward_sum = 0
     for event in events:
         if event in game_rewards:
-            #print(events)
+            #print(f"Event: {event}")
+            #print(f"Reward: {game_rewards[event]}")
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
+    #print("-----------------")
 
-    #print(reward_sum)
     return reward_sum
 
 def append_custom_events(self,old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
@@ -278,7 +283,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     elif e.BOMB_DROPPED in events:
         #check if dropped the bomb correctly
         if check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs, others_position)[0]:
-            if check_for_crates(self, np.array([x,y]), field.copy()) or np.all(features[FEATURES_TO_INT['OPPONENTS_AROUND_AGENT']] == 0):
+            if check_for_crates(self, np.array([x,y]), field.copy()):
                 events.append("GOOD_BOMB_PLACEMENT")
             else:
                 events.append("BAD_BOMB_PLACEMENT")
@@ -308,7 +313,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         #->coin and crate
         elif ( (coin_left == 1 or crate_left == 1 or opponent_left == 1)and e.MOVED_LEFT in events) or ( (coin_right == 1 or crate_right ==1 or opponent_right == 1)and e.MOVED_RIGHT in events) or ( (coin_up == 1  or crate_up==1 or opponent_up == 1) and e.MOVED_UP in events) or ( (coin_down == 1 or crate_down ==1 or opponent_down == 1) and e.MOVED_DOWN in events):
             events.append("MOVES_TOWARD_TARGET")
-        else:
+        elif not check_near_bombs(self, np.array([x,y]), field.copy(), bombs, 0):
             events.append("BAD_MOVE")
 
     return events
@@ -317,7 +322,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
 
 #TD
 def temporal_difference(self, reward, next_state):
-    print("d")
+    #print("d")
     y = reward
     if next_state is not None:
         #y = y + GAMMA * np.matmul(next_state, self.weights.T).max()
@@ -338,13 +343,41 @@ def n_step_td(self, episode_rewards, timestep, episode_next_steps):
     return y
 
 def monte_carlo(self, episode_rewards, timestep):
+    eps = np.array(episode_rewards.copy())
+
     y = 0
     #print("monte carlo episode rewards", episode_rewards)
-    for i, t in enumerate(range(timestep-1, len(episode_rewards))):
-        y = y + np.power(GAMMA, i) * episode_rewards[t]
+    #for i, t in enumerate(range(timestep-1, len(episode_rewards))):
+    #    y = y + np.power(GAMMA, i) * episode_rewards[t]
+    
+    a = np.arange(len(eps) - (timestep-1) )
+    b = eps[timestep-1:]
+    c = np.tile(GAMMA, len(eps) - (timestep-1) )
+
+    c = np.power(c, a)
+
+    d = c * b 
+
+    e = np.sum(d)
+    """
+    print("-------")
+    print(e)
+    print(y)
+    print("--------")
+    """
+
+    return e
+
+
+def sarsa(self, reward, next_state, action):
+    #print("--------")
+    #print(action)
+    #print(reward)
+    y = reward
+    if next_state is not None:
+        y = y + GAMMA * self.regression_forests[ACTION_TO_INT[action]].predict([next_state])
 
     return y
-
 
 def check_escape_route(self, field: np.array, starting_point: np.array, explosion_indices: np.array, bombs: list, opponents: np.array):
     """Tries to find an escape route after setting a bomb in the near of a crate. If there is an escape route

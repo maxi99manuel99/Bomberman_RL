@@ -32,7 +32,7 @@ def setup(self):
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        self.regression_forests = [RandomForestRegressor() for i in range(len(ACTIONS))]
+        self.regression_forests = [RandomForestRegressor(n_estimators=5) for i in range(len(ACTIONS))]
 
     else:
         self.logger.info("Loading model from saved state.")
@@ -50,21 +50,24 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     # todo Exploration vs exploitation
-    random_prob = .02
+    random_prob = .1
     
-    if self.train and (random.random() < random_prob or game_state['round'] < 500):
+    if self.train and (random.random() < random_prob or game_state['round'] < 100):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
     
     #approximate Q by regression forest
     Q =  [self.regression_forests[action_idx_to_test].predict([state_to_features(self, game_state)]) for action_idx_to_test in range(len(ACTIONS))]
+    #print("Q-values:")
+    #print(Q)
 
     #our policy is the argmax of the approximated Q-function
     action_idx = np.argmax(Q)
     #self.logger.debug("Querying model for action.")
     
-    #print(ACTIONS[action_idx])
+    #print(f"Action: {ACTIONS[action_idx]}")
+    
     return ACTIONS[action_idx]
 
 def state_to_features(self, game_state: dict) -> np.array:
@@ -106,38 +109,41 @@ def state_to_features(self, game_state: dict) -> np.array:
     #valid moves
     valid_moves = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
     #directions that lead to a dead end
-    dead_end_directions = check_dead_end_directions(self, (x,y), field)
+    dead_end_directions = check_dead_end_directions(self, (x,y), field.copy(), bombs)
 
-    crates_around_agent = np.zeros((9,9))
-    bomb_timers_around_agent = np.ones((9, 9)) * 100
-    explosions_duration_around_agent = np.zeros((9,9))
-    opponents_around_agent = np.zeros((9,9))
+    radius = 3
+    diameter = 9
 
-    for i in range(9):
-        for j in range(9):
-            current_x = x-4+i
-            current_y = y-4+j
+    crates_around_agent = np.zeros((diameter,diameter))
+    bomb_timers_around_agent = np.ones((diameter, diameter)) * 100
+    explosions_duration_around_agent = np.zeros((diameter,diameter))
+    opponents_around_agent = np.zeros((diameter,diameter))
+
+    for i in range(diameter):
+        for j in range(diameter):
+            current_x = x-radius+i
+            current_y = y-radius+j
             if current_x >=0 and current_x < s.COLS and current_y >=0 and current_y < s.ROWS:
 
                 #crate around player
                 #(number of crates that are in explosion range of the field we are looking at)
                 if field[current_x][current_y] != -1:
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[current_x+k][current_y] == -1:
                             break
                         elif field[current_x+k][current_y] == 1:
                             crates_around_agent[i][j] = crates_around_agent[i][j] + 1
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[current_x-k][current_y] == -1:
                             break
                         elif field[current_x-k][current_y] == 1:
                             crates_around_agent[i][j] = crates_around_agent[i][j] + 1
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[current_x][current_y+k] == -1:
                             break
                         elif field[current_x][current_y+k] == 1:
                             crates_around_agent[i][j] = crates_around_agent[i][j] + 1
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[current_x][current_y-k] == -1:
                             break
                         elif field[current_x][current_y-k] == 1:
@@ -150,28 +156,28 @@ def state_to_features(self, game_state: dict) -> np.array:
                     if np.all(bomb[0] == (current_x, current_y)):
                         bomb_timers_around_agent[i][j] = bomb[1]
 
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[bomb_detonation_point_x+k][bomb_detonation_point_y] == -1:
                                 break
                         
                         if np.all((bomb_detonation_point_x + k, bomb_detonation_point_y) == (current_x, current_y)):
                             bomb_timers_around_agent[i][j] = bomb[1]
 
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[bomb_detonation_point_x-k][bomb_detonation_point_y] == -1:
                                 break
                         
                         if np.all((bomb_detonation_point_x - k, bomb_detonation_point_y) == (current_x, current_y)):
                             bomb_timers_around_agent[i][j] = bomb[1]
 
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[bomb_detonation_point_x][bomb_detonation_point_y+k] == -1:
                                 break
                         
                         if np.all((bomb_detonation_point_x, bomb_detonation_point_y+k) == (current_x, current_y)):
                             bomb_timers_around_agent[i][j] = bomb[1]
 
-                    for k in range(1,4):
+                    for k in range(1,radius):
                         if field[bomb_detonation_point_x][bomb_detonation_point_y-k] == -1:
                                 break
                         
@@ -188,18 +194,33 @@ def state_to_features(self, game_state: dict) -> np.array:
                  
 
     features[0:4] = possible_directions_towards_coin
+    #print(features[0:4])
+    #print("possible coin direction")
+    #print(features[0:4])
 
     features[4:85] = crates_around_agent.flatten()
+    #print("crates around agent")
+    #print(features[4:85].reshape((9,9)).T)
     
     features[85:89] = valid_moves
+    #print("valid moves")
+    #print(features[85:89])
     
     features[89:93] = dead_end_directions
+    #print("dead end directions")
+    #print(features[89:93])
     
     features[93:174] = explosions_duration_around_agent.flatten()
+    #print("explosion duration around agent ")
+    #print(features[93:174].reshape((9,9)).T)
     
     features[174:255] = opponents_around_agent.flatten()
+    #print("opp")
+    #print(opponents_around_agent.reshape((9,9)).T)
     
     features[255:336] = bomb_timers_around_agent.flatten()
+    #print("bomb")
+    #print(bomb_timers_around_agent.reshape((9,9)).T)
   
     features[336] = int(own_bomb)
 
@@ -209,7 +230,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     if crate_indices.size != 0:
        features[337:341], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
     else:
-        features[337:341] = np.array([0,0,0,0])
+       features[337:341] = np.array([0,0,0,0])
 
     #the next feature is gonna be the direction we need to move to get to the next oponnent the fastest
     if len(others_position) != 0:
@@ -220,7 +241,12 @@ def state_to_features(self, game_state: dict) -> np.array:
     return features
 
 
-def check_dead_end_directions(self, starting_point, field):
+def check_dead_end_directions(self, starting_point, field, bombs):
+    #print("field")
+    #print(field.T)
+    for bomb in bombs:
+        field[bomb[0][0],bomb[0][1]] = -1
+
     x, y = starting_point
     dead_end_directions = [0,0,0,0]
 
@@ -240,14 +266,14 @@ def check_dead_end_directions(self, starting_point, field):
     
     for i in range(1,5):
         if field[x][y-i] != 0:
-            dead_end_directions[1] = 1
+            dead_end_directions[2] = 1
             break
         if field[x-1][y-i] == 0 or field[x+1][y-i] == 0:
             break
     
     for i in range(1,5):
         if field[x][y+i] != 0:
-            dead_end_directions[1] = 1
+            dead_end_directions[3] = 1
             break
         if field[x-1][y+i] == 0 or field[x+1][y+i] == 0:
             break
