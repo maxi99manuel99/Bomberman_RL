@@ -1,5 +1,0 @@
-2022-03-21 11:50:15,917 [BombeRLeWorld] INFO: Initializing game world
-2022-03-21 11:50:17,067 [BombeRLeWorld] INFO: STARTING ROUND #1
-2022-03-21 11:50:17,385 [BombeRLeWorld] INFO: STARTING STEP 1
-2022-03-21 11:50:17,415 [BombeRLeWorld] INFO: Agent <agent_007_improved> chose action WAIT in 0.03s.
-2022-03-21 11:50:17,415 [BombeRLeWorld] INFO: Agent <agent_007_improved> stayed within acceptable think time.
