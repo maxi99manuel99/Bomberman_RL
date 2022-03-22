@@ -28,7 +28,7 @@ def setup(self):
     """
 
     #feature dimension
-    self.D = 345
+    self.D = 348
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
@@ -50,7 +50,7 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     # todo Exploration vs exploitation
-    random_prob = .1
+    random_prob = .06
     
     if self.train and (random.random() < random_prob or game_state['round'] < 100):
         self.logger.debug("Choosing action purely at random.")
@@ -106,12 +106,13 @@ def state_to_features(self, game_state: dict) -> np.array:
     coin_distance_curr_pos = coin_distance_map[x][y]
     #directions to move to the closest coin
     possible_directions_towards_coin = np.array([int(coin_distance_map[x-1][y] < coin_distance_curr_pos), int(coin_distance_map[x+1][y] < coin_distance_curr_pos), int(coin_distance_map[x][y-1] < coin_distance_curr_pos), int(coin_distance_map[x][y+1] < coin_distance_curr_pos)])
+    coin_distance = min(coin_distance_map[x-1][y], coin_distance_map[x+1][y],coin_distance_map[x][y-1], coin_distance_map[x][y+1])
     #valid moves
     valid_moves = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
     #directions that lead to a dead end
     dead_end_directions = check_dead_end_directions(self, (x,y), field.copy(), bombs)
 
-    radius = 3
+    radius = 4
     diameter = 9
 
     crates_around_agent = np.zeros((diameter,diameter))
@@ -231,13 +232,19 @@ def state_to_features(self, game_state: dict) -> np.array:
        features[337:341], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
     else:
        features[337:341] = np.array([0,0,0,0])
+       crate_distance = 100
 
     #the next feature is gonna be the direction we need to move to get to the next oponnent the fastest
     if len(others_position) != 0:
         features[341:345], opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
     else:
         features[341:345] = np.array([0,0,0,0])
-    
+        opponent_distance = 100
+
+    features[345] = coin_distance
+    features[346] = crate_distance
+    features[347] = opponent_distance
+
     return features
 
 
@@ -435,4 +442,4 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
 
         return direction, path_length -1
     else:
-        return np.array([0,0,0,0]), np.inf
+        return np.array([0,0,0,0]), 100

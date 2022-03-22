@@ -23,7 +23,10 @@ FEATURES_TO_INT = {"DIRECTION_TO_COIN": [0,1,2,3],
                    "BOMB_TIMERS_AROUND_AGENT": np.arange(255,336),
                    "BOMB_ACTIVE": 336,
                    "DIRECTION_TO_CRATE": [337,338,339,340],
-                   "DIRECTION_TO_OPPONENT": [341,342,343,344]}
+                   "DIRECTION_TO_OPPONENT": [341,342,343,344],
+                   "COIN_DISTANCE": 345,
+                   "CRATE_DISTANCE": 346,
+                   "OPPONENT_DISTANCE": 347}
 
 
 Transition = namedtuple('Transition',
@@ -36,8 +39,8 @@ EpisodeTransition = namedtuple('EpisodeTransition',
 GAMMA = 0.1 # discount factor
 N = 2 # number of timesteps to look into the future for n_step td
 
-TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
-BATCH_SIZE = 7000 # subset of the transitions used for gradient update
+TRANSITION_HISTORY_SIZE = 50000  # keep only ... last transitions
+BATCH_SIZE = 30000 # subset of the transitions used for gradient update
 BATCH_PRIORITY_SIZE = 100 #sample the batch with the biggest squared loss
 
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
@@ -197,13 +200,15 @@ def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
         e.INVALID_ACTION: -20,
         e.GOT_KILLED: -200,
-        'LIFE_SAVING_MOVE': 20,
-        'GOOD_BOMB_PLACEMENT': 10,
+        e.COIN_COLLECTED: 17,
+        e.OPPONENT_ELIMINATED: 80,
+        'LIFE_SAVING_MOVE': 30,
+        'GOOD_BOMB_PLACEMENT': 17,
         'BAD_BOMB_PLACEMENT': -100,
         'DEADLY_MOVE': -100,
         'MOVES_TOWARD_TARGET': 3,
         'WAITING_ONLY_OPTION': 20,
-        'BAD_MOVE': -1,
+        'BAD_MOVE': -3,
     }
     #print("All rewards for this action")
     reward_sum = 0
@@ -283,7 +288,7 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     elif e.BOMB_DROPPED in events:
         #check if dropped the bomb correctly
         if check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs, others_position)[0]:
-            if check_for_crates(self, np.array([x,y]), field.copy()):
+            if check_for_crates(self, np.array([x,y]), field.copy()) or np.any(features[FEATURES_TO_INT['OPPONENTS_AROUND_AGENT']] == 1):
                 events.append("GOOD_BOMB_PLACEMENT")
             else:
                 events.append("BAD_BOMB_PLACEMENT")
@@ -297,7 +302,12 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         coin_left , coin_right, coin_up, coin_down = features[FEATURES_TO_INT['DIRECTION_TO_COIN']]
         crate_left , crate_right, crate_up, crate_down = features[FEATURES_TO_INT['DIRECTION_TO_CRATE']]
         opponent_left, opponent_right, opponent_up, opponent_down = features[FEATURES_TO_INT['DIRECTION_TO_OPPONENT']]
+        coin_distance, crate_distance, opponent_distance = [features[FEATURES_TO_INT['COIN_DISTANCE']], features[FEATURES_TO_INT['CRATE_DISTANCE']], features[FEATURES_TO_INT['OPPONENT_DISTANCE']]]
         
+        coin_weight = coin_distance * 1.5
+        crate_weight = crate_distance * 2.3
+        opponent_weight = opponent_distance 
+
         if np.all(valid_list == 0) and e.WAITED in events:
             events.append("WAITING_ONLY_OPTION")
         
@@ -309,12 +319,24 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         elif (explosion_left == 1 and e.MOVED_LEFT in events) or (explosion_right == 1 and e.MOVED_RIGHT in events) or (explosion_up== 1 and e.MOVED_UP in events) or (explosion_down== 1 and e.MOVED_DOWN in events):
             events.append("DEADLY_MOVE")
 
-        #check if move towards a target
-        #->coin and crate
-        elif ( (coin_left == 1 or crate_left == 1 or opponent_left == 1)and e.MOVED_LEFT in events) or ( (coin_right == 1 or crate_right ==1 or opponent_right == 1)and e.MOVED_RIGHT in events) or ( (coin_up == 1  or crate_up==1 or opponent_up == 1) and e.MOVED_UP in events) or ( (coin_down == 1 or crate_down ==1 or opponent_down == 1) and e.MOVED_DOWN in events):
-            events.append("MOVES_TOWARD_TARGET")
-        elif not check_near_bombs(self, np.array([x,y]), field.copy(), bombs, 0):
-            events.append("BAD_MOVE")
+        #check if we moved towards the target witht the best weight right now (coin, crate, enemy)
+        elif opponent_weight <= coin_weight and opponent_weight <= crate_weight:
+            if (e.MOVED_LEFT in events and opponent_left == 1) or (e.MOVED_RIGHT in events and opponent_right == 1) or (e.MOVED_UP in events and opponent_up == 1) or (e.MOVED_DOWN in events and opponent_down == 1):
+                events.append("MOVES_TOWARD_TARGET")
+            else:
+                events.append("BAD_MOVE")       
+        elif coin_weight <= crate_weight:
+            if (e.MOVED_LEFT in events and coin_left == 1) or (e.MOVED_RIGHT in events and coin_right == 1) or (e.MOVED_UP in events and coin_up == 1) or (e.MOVED_DOWN in events and coin_down == 1):
+                events.append("MOVES_TOWARD_TARGET")
+            else:
+                events.append("BAD_MOVE")   
+        else:
+            if (e.MOVED_LEFT in events and crate_left == 1) or (e.MOVED_RIGHT in events and crate_right == 1) or (e.MOVED_UP in events and crate_up == 1) or (e.MOVED_DOWN in events and crate_down == 1):
+                events.append("MOVES_TOWARD_TARGET")
+            else:
+                events.append("BAD_MOVE")   
+       
+    
 
     return events
 
