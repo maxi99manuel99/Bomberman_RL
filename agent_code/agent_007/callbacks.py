@@ -28,7 +28,7 @@ def setup(self):
     """
 
     #feature dimension
-    self.D = 27
+    self.D = 19
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
@@ -104,65 +104,64 @@ def state_to_features(self, game_state: dict) -> np.array:
 
     #the next feature is gonna be the direction we need to move to get to the next coin the fastest
     if len(coins) != 0:
-        features[0:4], coin_distance = breath_first_search(field.copy(), np.array([x,y]), coins, bombs , explosion_indices, others_position)
+        coin_directions, coin_distance = breath_first_search(field.copy(), np.array([x,y]), coins, bombs , explosion_indices, others_position)
     else:
-       features[0:4] = np.array([0,0,0,0])
+       coin_directions = np.array([0,0,0,0])
 
     #the next feature is gonna be the direction we need to move to get to the next crate the fastest
     crate_indices = np.array(np.where(field == 1)).T
 
     if crate_indices.size != 0:
-       features[4:8], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
+       crate_directions, crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
     else:
-        features[4:8] = np.array([0,0,0,0])
+        crate_directions = np.array([0,0,0,0])
 
     #the next feature is gonna be the direction we need to move to get to the next oponnent the fastest
     if len(others_position) != 0:
-        features[8:12], opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
+        opponent_directions, opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
     else:
-        features[8:12] = np.array([0,0,0,0])
+        opponent_directions = np.array([0,0,0,0])
 
     #the next feature is gonna be if there is a crate or enemy in the near and we can find an escape route, so that it is sensible to drop a bomb
     if check_escape_route(self, field.copy(), np.array([x,y]), explosion_indices, bombs, others_position)[0]:
         if check_for_crates(self, np.array([x,y]), field.copy()) or check_for_opponents(self, np.array([x,y]), field.copy(), others_position):
-            features[12] = 1
+            features[4] = 1
     
     if field[x-1,y] != -1 and field[x-1,y] != 1 :
-        features[13] = danger(self, np.array([x-1,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
+        features[5] = danger(self, np.array([x-1,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
     
     if field[x+1,y] != -1 and field[x+1,y] != 1 :
-        features[14] = danger(self, np.array([x+1,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
+        features[6] = danger(self, np.array([x+1,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
 
     if field[x,y-1] != -1 and field[x,y-1] != 1 :
-        features[15] = danger(self, np.array([x,y-1]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
+        features[7] = danger(self, np.array([x,y-1]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
 
     if field[x,y+1] != -1 and field[x,y+1] != 1 :
-        features[16] = danger(self, np.array([x,y+1]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
+        features[8] = danger(self, np.array([x,y+1]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
 
-    features[17] = danger(self, np.array([x,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
+    features[9] = danger(self, np.array([x,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
+
+    #print(features[5:10])
 
     #the next feature is gonna be if there is an explosion anywhere around us and how long its gonna stay
-    features[18:22] = np.array([ int(explosion_map[x-1,y]!= 0), int(explosion_map[x+1,y]!= 0), int(explosion_map[x,y-1]!=0), int(explosion_map[x,y+1] != 0)  ]) 
+    features[10:14] = np.array([ int(explosion_map[x-1,y]!= 0), int(explosion_map[x+1,y]!= 0), int(explosion_map[x,y-1]!=0), int(explosion_map[x,y+1] != 0)  ]) 
 
     #valid moves
-    features[22:26] = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
+    features[14:18] = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
 
     #the next feature is gonna show if a bomb action is possible
-    features[26] = int(bomb)
+    features[18] = int(bomb)
 
     coin_weight = coin_distance * 1.5
     crate_weight = crate_distance * 4
     opponent_weight = opponent_distance 
     
     if opponent_weight <= coin_weight and opponent_weight <= crate_weight:
-        features[0:4] = np.array([0,0,0,0])
-        features[4:8] = np.array([0,0,0,0])
+        features[0:4] = opponent_directions
     elif coin_weight <= crate_weight:
-        features[4:8] = np.array([0,0,0,0])
-        features[8:12] = np.array([0,0,0,0])
+        features[0:4] = coin_directions
     else:
-        features[0:4] = np.array([0,0,0,0])
-        features[8:12] = np.array([0,0,0,0])
+        features[0:4] = crate_directions
 
     return features
 
@@ -530,6 +529,10 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents):
     #update the field so that opponents are included
     for opponent in opponents:
         updated_field[opponent[0],opponent[1]] = -1
+        updated_field[opponent[0]-1, opponent[1]] = -1
+        updated_field[opponent[0]+1, opponent[1]] = -1
+        updated_field[opponent[0], opponent[1]+1] = -1
+        updated_field[opponent[0], opponent[1]-1] = -1
     
     #update the field so that bombs are included
     for bomb in bombs:
