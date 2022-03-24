@@ -187,13 +187,13 @@ def reward_from_events(self, events: List[str]) -> int:
     """
 
     game_rewards = {
-        e.INVALID_ACTION: -10,
+        e.INVALID_ACTION: -80,
         #e.KILLED_SELF: -500,
         e.GOT_KILLED: -500,
         'LIFE_SAVING_MOVE': 20,
         'GOOD_BOMB_PLACEMENT': 10,
         'BAD_BOMB_PLACEMENT': -50,
-        'DEADLY_MOVE': -50,
+        'DEADLY_MOVE': -150,
         'MOVES_TOWARD_TARGET': 5,
         'WAITING_ONLY_OPTION': 10,
         'BAD_MOVE': -4,
