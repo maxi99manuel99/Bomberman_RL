@@ -15,18 +15,17 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 ACTION_TO_INT = {'UP':0, 'RIGHT' : 1 , 'DOWN': 2, 'LEFT': 3, 'WAIT':4, 'BOMB': 5}
 
 FEATURES_TO_INT = {"DIRECTION_TO_COIN": [0,1,2,3],
-                   "CRATES_AROUND_AGENT": np.arange(4,85),
-                   "VALID_MOVES": [85,86,87,88],
-                   "DEAD_END_DIRECTIONS": [89,90,91,92],
-                   "EXPLOSIONS_AROUND_AGENT": np.arange(93,174),
-                   "OPPONENTS_AROUND_AGENT": np.arange(174,255),
-                   "BOMB_TIMERS_AROUND_AGENT": np.arange(255,336),
-                   "BOMB_ACTIVE": 336,
-                   "DIRECTION_TO_CRATE": [337,338,339,340],
-                   "DIRECTION_TO_OPPONENT": [341,342,343,344],
-                   "COIN_DISTANCE": 345,
-                   "CRATE_DISTANCE": 346,
-                   "OPPONENT_DISTANCE": 347}
+                   "VALID_MOVES": [4,5,6,7],
+                   "DEAD_END_DIRECTIONS": [8,9,10,11],
+                   "EXPLOSIONS_AROUND_AGENT": [12,13,14,15],
+                   "OPPONENTS_AROUND_AGENT": np.arange(16,65),
+                   "BOMB_TIMERS_AROUND_AGENT": np.arange(65,114),
+                   "BOMB_ACTIVE": 114,
+                   "DIRECTION_TO_CRATE": [115,116,117,118],
+                   "DIRECTION_TO_OPPONENT": [119,120,121,122],
+                   "COIN_DISTANCE": 123,
+                   "CRATE_DISTANCE": 124,
+                   "OPPONENT_DISTANCE": 125}
 
 
 Transition = namedtuple('Transition',
@@ -143,14 +142,15 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.episode_next_states.clear()
     self.episode_transitions.clear()
 
-
+    if last_game_state['round'] < 800:
+        return
     """
     SAMPLE A BATCH FROM THE EXPERIENCE BUFFER AND USE IT TO IMPROVIZE THE WEIGHT VECTORS
     """
 
     #only start fitting after we have tried enough random actions
-    if last_game_state['round'] < 99:
-        return
+    #if last_game_state['round'] < 99:
+     #   return
 
     #random subset of experience buffer
     indices = np.random.choice(np.arange(len(self.transitions), dtype=int), min(len(self.transitions), BATCH_SIZE), replace=False)
@@ -169,8 +169,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         #the learning rate.
         if len(subbatch) != 0:
             #calculate the responses
-            if last_game_state['round'] == 99 :
-                response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
+            #if last_game_state['round'] == 99 :
+             #   response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
+            if False:
+                pass
             else:   
                 #continue with monte carlo
                 response = np.array([monte_carlo(self, transition[3], transition[4]) for transition in subbatch])
@@ -510,6 +512,10 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents):
     #update the field so that opponents are included
     for opponent in opponents:
         updated_field[opponent[0],opponent[1]] = -1
+        updated_field[opponent[0]-1, opponent[1]] = -1
+        updated_field[opponent[0]+1, opponent[1]] = -1
+        updated_field[opponent[0], opponent[1]+1] = -1
+        updated_field[opponent[0], opponent[1]-1] = -1
     
     #update the field so that bombs are included
     for bomb in bombs:
@@ -539,7 +545,7 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents):
         #new explosions
         for bomb in bombs:
             #print(f"bomb timer: {bomb[1]}")
-            if bomb[1] - distance[current_position] == -1:
+            if bomb[1] - distance[current_position] == -1 or bomb[1] - distance[current_position] == 0:
                 #print("update field 1")
                 for i in range(-3,4):
                     if bomb[0][0]+i >= 0 and bomb[0][0]+i < s.COLS:
@@ -548,7 +554,7 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents):
                     if bomb[0][1]+i >= 0 and bomb[0][1]+i < s.ROWS:
                         updated_field[bomb[0][0],bomb[0][1]+i] = -1
 
-            if bomb[1] - distance[current_position] < -1:
+            elif bomb[1] - distance[current_position] < -1:
                 #print("update field 2")
                 for i in range(-3,4):
                     if bomb[0][0]+i >= 0 and bomb[0][0]+i < s.COLS and field[bomb[0][0]+i,bomb[0][1]] != -1:
@@ -563,7 +569,7 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents):
 
         #print(f"x: {x} y: {y}")
 
-        bombs_found, min_cooldown = check_near_bombs(self, [x,y], updated_field.copy(), bombs, distance[current_position])
+        bombs_found, min_cooldown = check_near_bombs(self, [x,y], field.copy(), bombs, distance[current_position])
 
         #this move is 100% save
         if not bombs_found:
@@ -636,7 +642,7 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
 
     if check_right:
         for i in range(1,4):
-            if x+i >= s.COLS:
+            if field[x+i][y] == -1:
                 break 
 
             if field[x+i,y] >= 10:
@@ -647,7 +653,7 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
 
     if check_left and min_cooldown != 0:
         for i in range(1,4):
-            if x-i < 0:
+            if field[x-i][y] == -1:
                 break
 
             if field[x-i,y] >= 10:
@@ -657,7 +663,7 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
 
     if check_down and min_cooldown != 0:
         for i in range(1,4):
-            if y+i >= s.ROWS:
+            if field[x][y+i] == -1:
                 break
 
             if field[x,y+i] >= 10:
@@ -667,7 +673,7 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
 
     if check_up and min_cooldown != 0:
         for i in range(1,4):
-            if y-i < 0:
+            if field[x][y-i] == -1:
                 break 
             
             if field[x,y-i] >= 10:
@@ -676,13 +682,14 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
 
     return bomb_found, min_cooldown
 
+
 def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
     x, y = agent_position
     check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
 
     if check_right:
         for i in range(1,4):
-            if x+i >= s.COLS:
+            if field[x+i][y] == -1:
                 break 
 
             if field[x+i,y] == 1:
@@ -690,7 +697,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
 
     if check_left:
         for i in range(1,4):
-            if x-i < 0:
+            if field[x-i][y] == -1:
                 break
 
             if field[x-i,y] == 1:
@@ -698,7 +705,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
 
     if check_down:
         for i in range(1,4):
-            if y+i >= s.ROWS:
+            if field[x][y+i] == -1:
                 break
 
             if field[x,y+i] == 1:
@@ -706,7 +713,7 @@ def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
 
     if check_up:
         for i in range(1,4):
-            if y-i < 0:
+            if field[x][y-i] == -1:
                 break 
             
             if field[x,y-i] == 1:

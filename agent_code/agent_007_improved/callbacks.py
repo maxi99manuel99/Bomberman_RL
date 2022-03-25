@@ -28,12 +28,13 @@ def setup(self):
     """
 
     #feature dimension
-    self.D = 348
+    self.D = 126
 
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        self.regression_forests = [RandomForestRegressor(n_estimators=5) for i in range(len(ACTIONS))]
-
+        #self.regression_forests = [RandomForestRegressor(n_estimators=5) for i in range(len(ACTIONS))]
+        with open("my-saved-model.pt", "rb") as file:
+            self.regression_forests = pickle.load(file)
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
@@ -52,7 +53,7 @@ def act(self, game_state: dict) -> str:
     # todo Exploration vs exploitation
     random_prob = .06
     
-    if self.train and (random.random() < random_prob or game_state['round'] < 100):
+    if self.train and random.random() < random_prob:  #or game_state['round'] < 100):
         self.logger.debug("Choosing action purely at random.")
         #80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
@@ -107,48 +108,33 @@ def state_to_features(self, game_state: dict) -> np.array:
     #directions to move to the closest coin
     possible_directions_towards_coin = np.array([int(coin_distance_map[x-1][y] < coin_distance_curr_pos), int(coin_distance_map[x+1][y] < coin_distance_curr_pos), int(coin_distance_map[x][y-1] < coin_distance_curr_pos), int(coin_distance_map[x][y+1] < coin_distance_curr_pos)])
     coin_distance = min(coin_distance_map[x-1][y], coin_distance_map[x+1][y],coin_distance_map[x][y-1], coin_distance_map[x][y+1])
+    
+    
+    #update field with bombs and opponents to check valid moves
+    updated_field = field.copy()
+    for bomb in bombs:
+        updated_field[bomb[0][0]][bomb[0][1]] = -1
+    
+    for opponent_pos in others_position:
+        updated_field[opponent_pos[0]][opponent_pos[1]] = -1
+
     #valid moves
-    valid_moves = np.array([ int(field[x-1,y] == 0), int(field[x+1,y] == 0), int(field[x,y-1] == 0), int(field[x,y+1] == 0) ])
+    valid_moves = np.array([ int(updated_field[x-1,y] == 0), int(updated_field[x+1,y] == 0), int(updated_field[x,y-1] == 0), int(updated_field[x,y+1] == 0) ])
+    
     #directions that lead to a dead end
     dead_end_directions = check_dead_end_directions(self, (x,y), field.copy(), bombs)
 
     radius = 4
-    diameter = 9
+    diameter = 7
 
-    crates_around_agent = np.zeros((diameter,diameter))
     bomb_timers_around_agent = np.ones((diameter, diameter)) * 100
-    explosions_duration_around_agent = np.zeros((diameter,diameter))
     opponents_around_agent = np.zeros((diameter,diameter))
 
     for i in range(diameter):
         for j in range(diameter):
-            current_x = x-radius+i
-            current_y = y-radius+j
+            current_x = x-3+i
+            current_y = y-3+j
             if current_x >=0 and current_x < s.COLS and current_y >=0 and current_y < s.ROWS:
-
-                #crate around player
-                #(number of crates that are in explosion range of the field we are looking at)
-                if field[current_x][current_y] != -1:
-                    for k in range(1,radius):
-                        if field[current_x+k][current_y] == -1:
-                            break
-                        elif field[current_x+k][current_y] == 1:
-                            crates_around_agent[i][j] = crates_around_agent[i][j] + 1
-                    for k in range(1,radius):
-                        if field[current_x-k][current_y] == -1:
-                            break
-                        elif field[current_x-k][current_y] == 1:
-                            crates_around_agent[i][j] = crates_around_agent[i][j] + 1
-                    for k in range(1,radius):
-                        if field[current_x][current_y+k] == -1:
-                            break
-                        elif field[current_x][current_y+k] == 1:
-                            crates_around_agent[i][j] = crates_around_agent[i][j] + 1
-                    for k in range(1,radius):
-                        if field[current_x][current_y-k] == -1:
-                            break
-                        elif field[current_x][current_y-k] == 1:
-                            crates_around_agent[i][j] = crates_around_agent[i][j] + 1
                 
                 #bombs around agent
                 for bomb in bombs:
@@ -185,9 +171,6 @@ def state_to_features(self, game_state: dict) -> np.array:
                         if np.all((bomb_detonation_point_x, bomb_detonation_point_y-k) == (current_x, current_y)):
                             bomb_timers_around_agent[i][j] = bomb[1]
 
-                
-                #explostions around player
-                explosions_duration_around_agent[i][j] = explosion_map[current_x][current_y]
 
                 #opponents around player
                 if [current_x, current_y] in others_position.tolist():
@@ -199,51 +182,45 @@ def state_to_features(self, game_state: dict) -> np.array:
     #print("possible coin direction")
     #print(features[0:4])
 
-    features[4:85] = crates_around_agent.flatten()
-    #print("crates around agent")
-    #print(features[4:85].reshape((9,9)).T)
+    #valid moves
+    features[4:8] = valid_moves
     
-    features[85:89] = valid_moves
-    #print("valid moves")
-    #print(features[85:89])
-    
-    features[89:93] = dead_end_directions
+    features[8:12] = dead_end_directions
     #print("dead end directions")
     #print(features[89:93])
     
-    features[93:174] = explosions_duration_around_agent.flatten()
-    #print("explosion duration around agent ")
-    #print(features[93:174].reshape((9,9)).T)
+    #explosion around agent
+    features[12:16] = np.array([ int(explosion_map[x-1,y]!= 0), int(explosion_map[x+1,y]!= 0), int(explosion_map[x,y-1]!=0), int(explosion_map[x,y+1] != 0)  ])
     
-    features[174:255] = opponents_around_agent.flatten()
+    features[16:65] = opponents_around_agent.flatten()
     #print("opp")
     #print(opponents_around_agent.reshape((9,9)).T)
     
-    features[255:336] = bomb_timers_around_agent.flatten()
+    features[65:114] = bomb_timers_around_agent.flatten()
     #print("bomb")
     #print(bomb_timers_around_agent.reshape((9,9)).T)
   
-    features[336] = int(own_bomb)
+    features[114] = int(own_bomb)
 
     #the next feature is gonna be the direction we need to move to get to the next crate the fastest
     crate_indices = np.array(np.where(field == 1)).T
 
     if crate_indices.size != 0:
-       features[337:341], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
+       features[115:119], crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
     else:
-       features[337:341] = np.array([0,0,0,0])
+       features[115:119] = np.array([0,0,0,0])
        crate_distance = 100
 
     #the next feature is gonna be the direction we need to move to get to the next oponnent the fastest
     if len(others_position) != 0:
-        features[341:345], opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
+        features[119:123], opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
     else:
-        features[341:345] = np.array([0,0,0,0])
+        features[119:123] = np.array([0,0,0,0])
         opponent_distance = 100
 
-    features[345] = coin_distance
-    features[346] = crate_distance
-    features[347] = opponent_distance
+    features[123] = coin_distance
+    features[124] = crate_distance
+    features[125] = opponent_distance
 
     return features
 
