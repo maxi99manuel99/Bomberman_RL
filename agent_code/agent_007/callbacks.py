@@ -1,11 +1,9 @@
 import os
 import pickle
-import queue
 import random
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from collections import namedtuple, deque
-from typing import Tuple
 
 import settings as s
 
@@ -49,7 +47,7 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    # todo Exploration vs exploitation
+    #Exploration vs exploitation
     random_prob = .1
 
     if self.train and (random.random() < random_prob or game_state['round'] < 100):
@@ -62,9 +60,8 @@ def act(self, game_state: dict) -> str:
 
     #our policy is the argmax of the approximated Q-function
     action_idx = np.argmax(Q)
-    #self.logger.debug("Querying model for action.")
+    self.logger.debug("Querying model for action.")
 
-    #print(ACTIONS[action_idx])
     return ACTIONS[action_idx]
 
 def state_to_features(self, game_state: dict) -> np.array:
@@ -85,7 +82,6 @@ def state_to_features(self, game_state: dict) -> np.array:
     features = np.zeros(self.D)
 
     field = np.array(game_state['field'])
-
     coins = np.array(game_state['coins'])
     bombs = game_state['bombs']
     explosion_map = np.array(game_state['explosion_map'])
@@ -102,23 +98,23 @@ def state_to_features(self, game_state: dict) -> np.array:
     crate_distance = np.inf
     opponent_distance = np.inf
 
-    #the next feature is gonna be the direction we need to move to get to the next coin the fastest
+    #direction and distance, to the next coin
     if len(coins) != 0:
-        coin_directions, coin_distance = breath_first_search(field.copy(), np.array([x,y]), coins, bombs , explosion_indices, others_position)
+        coin_directions, coin_distance = breadth_first_search(field.copy(), np.array([x,y]), coins, bombs , explosion_indices, others_position)
     else:
        coin_directions = np.array([0,0,0,0])
 
-    #the next feature is gonna be the direction we need to move to get to the next crate the fastest
+    #direction and distance to the next crate
     crate_indices = np.array(np.where(field == 1)).T
 
     if crate_indices.size != 0:
-       crate_directions, crate_distance = breath_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
+       crate_directions, crate_distance = breadth_first_search(field.copy(), np.array([x,y]), crate_indices, bombs, explosion_indices, others_position)
     else:
         crate_directions = np.array([0,0,0,0])
 
-    #the next feature is gonna be the direction we need to move to get to the next oponnent the fastest
+    #direction and distance to the next opponent
     if len(others_position) != 0:
-        opponent_directions, opponent_distance = breath_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
+        opponent_directions, opponent_distance = breadth_first_search(field.copy(), np.array([x,y]), others_position, bombs, explosion_indices, others_position)
     else:
         opponent_directions = np.array([0,0,0,0])
 
@@ -130,6 +126,7 @@ def state_to_features(self, game_state: dict) -> np.array:
             if not danger(self, np.array([x,y]), updated_bombs.copy(), field.copy(), explosion_map.copy(), others_position.copy()):
                 features[4] = 1
 
+    #the next feature is gonna be which moves are very dangerous (deadly)
     if field[x-1,y] != -1 and field[x-1,y] != 1 :
         features[5] = danger(self, np.array([x-1,y]), bombs.copy(), field.copy(), explosion_map.copy(), others_position)
         
@@ -155,13 +152,15 @@ def state_to_features(self, game_state: dict) -> np.array:
     for opponent_pos in others_position:
         updated_field[opponent_pos[0]][opponent_pos[1]] = -1
 
-    #valid moves
+    #the next feature are gonna be which moves are valid right now
     features[14:18] = np.array([ int(updated_field[x-1,y] == 0), int(updated_field[x+1,y] == 0), int(updated_field[x,y-1] == 0), int(updated_field[x,y+1] == 0) ])
     #print("Valid Moves:", features[14:18])
 
     #the next feature is gonna show if a bomb action is possible
     features[18] = int(own_bomb)
 
+    #weighting coin, crate and opponent-distance and combining them into one feature
+    #giving the direction to the next target
     coin_weight = coin_distance
     crate_weight = crate_distance * 4
     opponent_weight = opponent_distance 
@@ -176,70 +175,73 @@ def state_to_features(self, game_state: dict) -> np.array:
     return features
 
 
-    ''' For example, you could construct several channels of equal shape, ...
-    channels = []
-    channels.append(...)
-    # concatenate them as a feature tensor (they must have the same shape), ...
-    stacked_channels = np.stack(channels)
-    # and return them as a vector
-    return stacked_channels.reshape(-1)
-    '''
+def breadth_first_search(field, starting_point, targets, bombs , explosion_indices, opponents): 
+    """performs a breadth first search  on the field from a given starting point to find the fastest 
+    way to a target point (when multiple target points are given it will find the fastest way to the closest)
 
-#perform a breadth first sreach to get the direction to nearest coin
-def breath_first_search(field: np.array, starting_point: np.array, targets:np.array, bombs , explosion_indices, opponents)->np.array: 
-    """
-    :param: field: Describes the current copied game board. 0 stays for free tile, 1 for stone walls and -1 for crates
-            starting_point: The current position of the player. The position is a 1 dimensional value and the flattend version of the 2D field
-    :return: np.array
-    """
+    Args:
+        field : The field to perform the breadth first search on including walls etc.
+        starting_point: The position to start the breadth first search from (x,y)
+        targets: List of targets to find the fastest way too [(x,y),(x,y),(x,y)]
+        bombs: List of positions where bombs are located (need them to update the field, because they block path)
+        explosion_indices: List of positions where explosions are located (need them to update the field, because they block path)
+        opponents: List of positions where opponents are located (need them to update the field, because they block path)
 
-    #update the field so that the bombs are included
+    Returns:
+         The next move that should be performed to walk towards the closest target as well as the distance to that target
+    """
+   
+
+    #update the field so that the bombs are included, treated like walls 
     for bomb in bombs:
         field[bomb[0][0],bomb[0][1]] = -1
     
-    #update the field so that opponents are included
+    #update the field so that opponents are included, treated like walls
     for opponent in opponents:
         field[opponent[0],opponent[1]] = -1
 
-    #update the field so that the explosions are included
+    #update the field so that the explosions are included, treated like walls
     for explosion_index in explosion_indices:
         field[explosion_index[0], explosion_index[1]] = -1
 
-    #update the field so that the coins are included
+    #crates are not treated like walls because you can destroy them to get to your target
+
+    #update the field so that the targets are included, marked by a 2 on the field
     for target in targets:
         field[target[0],target[1]] = 2
     
-    #Use this list to get backtrace the path from the nearest coin to the players position to get the direction
+    #Use this list to get backtrace the path from the nearest target to the players position to get the direction
     parent = np.ones(s.COLS*s.ROWS) * -1
 
     #Queue for visiting the tiles. 
     start = starting_point[1] * s.COLS + starting_point[0]
     parent[start] = start
 
-    #check if the player is already in a coin field
+    #check if the player is already on a target field
     if field[starting_point[0],starting_point[1]] == 2:
         return np.array([0,0,0,0]),0
     
     path_queue = np.array([start])
     counter = 0
     
-    coin_reached = False
+    target_reached = False
     target = None
 
-    #Visit tiles until a tile contains a coin
-    while not coin_reached and counter < len(path_queue):
+    #Visit tiles until a tile contains a target
+    while not target_reached and counter < len(path_queue):
         current_position = path_queue[counter]
         
         #get the 2D coordinates
         x = current_position % s.COLS
         y = current_position // s.COLS
 
-        #check if we reached a coin
+        #check if we reached a target
         if field[x, y] == 2:
-            coin_reached = True
+            target_reached = True
             target = current_position
         
         else:
+            #append neighbours if path in the directions is not blocked and if we have not visited them yet
             #left from the current position. 
             if current_position % s.COLS != 0 and field[x-1,y]!= -1 and parent[current_position-1] == -1:
                 path_queue = np.append(path_queue, current_position-1)
@@ -263,8 +265,10 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
         #increase counter to get the next tile from the queue
         counter = counter + 1
     
+    #if we found a viable path (not blocked by walls etc.)
+    #we traverse this path to get the direction we need to move towards next
     if target is not None:
-        #get the path from the nearest coin to the player by accessing the parent list
+        #get the path from the nearest target to the player by accessing the parent list
         path = [target]
         tile = target
         
@@ -276,147 +280,192 @@ def breath_first_search(field: np.array, starting_point: np.array, targets:np.ar
 
         path_length = len(path)
 
-        #get the second tile of the path which indicates the direction to the nearest coin
-        next_position = path[1]
+        #get the second tile of the path which indicates the direction to the nearest target
         next_position_x = path[1] % s.COLS
         next_position_y = path[1] // s.COLS
 
         direction = [int(next_position_x < starting_point[0]), int(next_position_x > starting_point[0]), int(next_position_y < starting_point[1]), int(next_position_y > starting_point[1])] 
 
         return direction, path_length -1
+    #if there was no path found we return infinite distance and no possible direction
     else:
         return np.array([0,0,0,0]), np.inf
 
-def check_for_crates(self, agent_position: np.array , field: np.array) -> bool:
+def check_for_crates(self, agent_position, field):
+    """Given a field and an agent_position, this function checks if any crates would be destroyed if 
+    a bomb was to be planted at that agent_position
+
+    Args:
+        agent_position: The position of the agent, where we want to check if a bomb would hit any crates
+        field: The current field including walls etc.
+
+    Returns:
+        Bool whether planting a bomb at the given position would destroy any crates or not
+    """
     x, y = agent_position
-    check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
+    
+    #field == 1 indicates a crate, -1 indicates a wall
+    #we can break when we hit a wall, since this will block the further explosion
+    #check if the bomb would hit a crate on the right side of the agent
+    for i in range(1,4):
+        if field[x+i][y] == -1:
+            break 
 
-    if check_right:
-        for i in range(1,4):
-            if field[x+i][y] == -1:
-                break 
+        if field[x+i,y] == 1:
+            return True
 
-            if field[x+i,y] == 1:
-                return True
+    #check if the bomb would hit a crate on the left side of the agent
+    for i in range(1,4):
+        if field[x-i][y] == -1:
+            break
 
-    if check_left:
-        for i in range(1,4):
-            if field[x-i][y] == -1:
-                break
+        if field[x-i,y] == 1:
+            return True 
 
-            if field[x-i,y] == 1:
-                return True 
+    #check if the bomb would hit a crate below the agent
+    for i in range(1,4):
+        if field[x][y+i] == -1:
+            break
 
-    if check_down:
-        for i in range(1,4):
-            if field[x][y+i] == -1:
-                break
+        if field[x,y+i] == 1:
+            return True 
 
-            if field[x,y+i] == 1:
-                return True 
+    #check if the bomb would hit a crate above the agent
+    for i in range(1,4):
+        if field[x][y-i] == -1:
+            break 
+        
+        if field[x,y-i] == 1:
+            return True 
 
-    if check_up:
-        for i in range(1,4):
-            if field[x][y-i] == -1:
-                break 
-            
-            if field[x,y-i] == 1:
-                return True 
-
+    #no crates hit
     return False
 
-def check_for_opponents(self, agent_position: np.array , field: np.array, opponents) -> bool:
-    x, y = agent_position
-    check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
+def check_for_opponents(self, agent_position, field, opponents):
+    """Given a field, an agent_position and positions where opponents are located this function checks if any opponents would be hit if 
+    a bomb was to be planted at that agent_position
 
+    Args:
+        agent_position: The position of the agent, where we want to check if a bomb would hit any opponents
+        field: The current field including walls etc.
+        opponents: Positions where opponents are located
+
+    Returns:
+        Bool whether planting a bomb at the given position would hit any opponents or not
+    """
+    x, y = agent_position
+
+    #update field to include the opponents that we want to check for, indicated by a 2
     for opponent in opponents:
         field[opponent[0], opponent[1]] = 2
 
-    if check_right:
-        for i in range(1,4):
-            if field[x+i][y] == -1:
-                break 
+    #field == 2 indicates a opponent, -1 indicates a wall
+    #we can break when we hit a wall, since this will block the further explosion
+    #check if the bomb would hit any opponent on the right side of the agent
+    for i in range(1,4):
+        if field[x+i][y] == -1:
+            break 
 
-            if field[x+i,y] == 2:
-                return True
+        if field[x+i,y] == 2:
+            return True
 
-    if check_left:
-        for i in range(1,4):
-            if field[x-i][y] == -1:
-                break
+    #check if the bomb would hit any opponent on the left side of the agent
+    for i in range(1,4):
+        if field[x-i][y] == -1:
+            break
 
-            if field[x-i,y] == 2:
-                return True 
+        if field[x-i,y] == 2:
+            return True 
 
-    if check_down:
-        for i in range(1,4):
-            if field[x][y+i] == -1:
-                break
+    #check if the bomb would hit any opponent below the agent
+    for i in range(1,4):
+        if field[x][y+i] == -1:
+            break
 
-            if field[x,y+i] == 2:
-                return True 
+        if field[x,y+i] == 2:
+            return True 
 
-    if check_up:
-        for i in range(1,4):
-            if field[x][y-i] == -1:
-                break 
-            
-            if field[x,y-i] == 2:
-                return True 
+    #check if the bomb would hit any opponent above the agents
+    for i in range(1,4):
+        if field[x][y-i] == -1:
+            break 
+        
+        if field[x,y-i] == 2:
+            return True 
 
     return False
 
-def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, steps_passed):
-    x, y = agent_position
-    #print(f"x: {x} y: {y}")
-    #print("field")
-    #print(field.T)
+def check_near_bombs(self, agent_position, field, bombs, steps_passed):
+    """Given a field, an agent_position and positions where bombs are located
+    as well as their cooldown (and how many steps we look into the future, which will decrease their colldown)
+    this function checks if the agent positions is within
+    the explosion radius of one of the bombs and if so how long this bomb will take
+    to explode
 
+    This function is used as a helping function for the danger function
+
+    Args:
+        agent_position: The position of the agent, where we want to check if a bomb would hit any opponents
+        field: The current field including walls etc.
+        bombs: Positions where bombs are located
+        steps_passed: The amount of steps we are looking into the future, which will decrease bomb_cooldown
+
+    Returns:
+        Bool indicating wheter the agent_position is in range of a possible bomb explosion
+        and how long this bomb will take to explode
+    """
+
+    x, y = agent_position
+
+    #update the field so that the bomb positions are included (indicated by values over 10)
+    #the field will contain the cooldown of the bomb + 10
     for bomb in bombs:
         field[bomb[0][0], bomb[0][1]] = 10 + bomb[1] - steps_passed
 
-    check_left, check_right, check_up, check_down =  np.array([field[x-1,y] != -1 , field[x+1,y] != -1, field[x,y-1] != -1, field[x,y+1] != -1])
-
-    #print(f"check left {check_left} check right {check_right} check up {check_up} check down {check_down} ")
+    #we want to find the bomb, that would hit the agent with the smallest cooldown
+    #since this is the bomb that put him in danger the soonest
     bomb_found = False
     min_cooldown = 100
 
+    #check if a bomb is on the field of the agent
     if field[x,y] >= 10:
         bomb_found = True
         min_cooldown = min(min_cooldown, field[x,y] - 10)
 
-    if check_right:
+    #check if a bomb is to the right of the agent, that will hit him if he stays at that position
+    #when min_cooldown is 0 this means we have already found a bomb with the minimum possible cooldown
+    #so it makes no sense to continue searching
+    if min_cooldown != 0:
         for i in range(1,4):
             if field[x+i][y] == -1:
                 break 
 
             if field[x+i,y] >= 10:
-                #print("1")
                 bomb_found = True
                 min_cooldown = min(min_cooldown, field[x+i,y] - 10)
                 
-
-    if check_left and min_cooldown != 0:
+    #check if a bomb is to the left of the agent, that will hit him if he stays at that position
+    if min_cooldown != 0:
         for i in range(1,4):
             if field[x-i][y] == -1:
                 break
 
             if field[x-i,y] >= 10:
-                #print("2")
                 bomb_found = True
                 min_cooldown = min(min_cooldown, field[x-i,y] - 10)
 
-    if check_down and min_cooldown != 0:
+    #check if a bomb is below the agent, that will hit him if he stays at that position
+    if min_cooldown != 0:
         for i in range(1,4):
             if field[x][y+i] == -1:
                 break
 
             if field[x,y+i] >= 10:
-                #print("3")
                 bomb_found = True
                 min_cooldown = min(min_cooldown, field[x,y+i] - 10)
 
-    if check_up and min_cooldown != 0:
+    #check if a bomb is above of the agent, that will hit him if he stays at that position
+    if min_cooldown != 0:
         for i in range(1,4):
             if field[x][y-i] == -1:
                 break 
@@ -429,10 +478,27 @@ def check_near_bombs(self, agent_position: np.array , field: np.array, bombs, st
 
 
 def danger(self, starting_point, bombs, field, explosion_map, opponents, starting_distance=0):
+    """Given a field and a starting point as well as a list of bomb positions, opponents
+    and an explosion map, this function checks if being on the starting point in the given situation is deadly
+    or if there is a path to escape from possible bombs, explosions etc at the current time.
+
+    Args:
+        starting_point: The point to check if it is deadly in the current situation
+        bombs: List of positions of bombs on the field
+        field: The current field including walls etc.
+        explosion_map: A map that includes all current ongoing explosions and how long they will stay
+        opponents: List of positions of opponents
+        starting_distance (optional): You can use this parameter if the agent is distant from a 
+        position you want to check, to check if the position will be dangerous when the agent arrives.
+        Defaults to 0. 
+
+    Returns:
+        Bool indicating if the position is deadly in the current situation or not
+    """
     #update the field so that the bombs are included
     updated_field = field.copy()
 
-    #update the field so that opponents are included
+    #update the field so that opponents are included, treated like walls
     for opponent in opponents:
         updated_field[opponent[0],opponent[1]] = -1
         updated_field[opponent[0]-1, opponent[1]] = -1
@@ -440,12 +506,10 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents, startin
         updated_field[opponent[0], opponent[1]+1] = -1
         updated_field[opponent[0], opponent[1]-1] = -1
     
-    #update the field so that bombs are included
+    #update the field so that bombs are included, treated like walls
     for bomb in bombs:
         updated_field[bomb[0][0],bomb[0][1]] = -1
 
-    #print("Updated field: ")
-    #print(updated_field.T)
 
     parent = np.ones(s.COLS*s.ROWS) * -1
     start = starting_point[1] * s.COLS + starting_point[0]
@@ -460,16 +524,10 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents, startin
     while counter < len(path_queue):
         current_position = path_queue[counter]
         dist = distance[current_position]
-        #print(f"Current position: {current_position}")
-
-        #print(f"Distance: {dist}")
 
         #update field to include explosions since explosions might have passed and new explosions might have spawned
-        #new explosions
         for bomb in bombs:
-            #print(f"bomb timer: {bomb[1]}")
             if bomb[1] - distance[current_position] == -1 or bomb[1] - distance[current_position] == 0:
-                #print("update field 1")
                 for i in range(-3,4):
                     if bomb[0][0]+i >= 0 and bomb[0][0]+i < s.COLS:
                         updated_field[bomb[0][0]+i,bomb[0][1]] = -1
@@ -478,7 +536,6 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents, startin
                         updated_field[bomb[0][0],bomb[0][1]+i] = -1
 
             elif bomb[1] - distance[current_position] < -1:
-                #print("update field 2")
                 for i in range(-3,4):
                     if bomb[0][0]+i >= 0 and bomb[0][0]+i < s.COLS and field[bomb[0][0]+i,bomb[0][1]] != -1:
                         updated_field[bomb[0][0]+i,bomb[0][1]] = 0
@@ -489,59 +546,47 @@ def danger(self, starting_point, bombs, field, explosion_map, opponents, startin
         #get the 2D coordinates
         x = current_position % s.COLS
         y = current_position // s.ROWS
-
-        #print(f"x: {x} y: {y}")
-
+        
+        #check if there are any dangerous bombs around this position
+        #and how long they will take to explode
         bombs_found, min_cooldown = check_near_bombs(self, [x,y], field.copy(), bombs, distance[current_position])
 
-        #this move is 100% save
+        #the given position is 100% save in the current situation
         if not bombs_found:
-            #print("no bombs found")
             return False
         
-        #print("bomb found!")
-
         #this path is 100% not save, try a new path
         if min_cooldown == 0:
-            #print("cooldown is zero")
             counter = counter + 1
             continue
     
         #left from the current position. 
         if current_position % s.COLS != 0 and updated_field[x-1,y] != -1 and updated_field[x-1,y] != 1 and updated_field[x-1,y]!= -1 and parent[current_position-1] == -1 and explosion_map[x-1,y] - distance[current_position] <= 0:
-            #print("go left")
             path_queue = np.append(path_queue, current_position-1)
             parent[current_position-1] = current_position
             distance[current_position-1] = distance[current_position] +1
-        
 
         #right from the current position
         if current_position % s.COLS != s.COLS-1 and updated_field[x+1,y] != -1 and updated_field[x+1,y]!=1 and updated_field[x+1,y]!= -1 and parent[current_position+1] == -1 and explosion_map[x+1,y] - distance[current_position] <= 0:
-            #print("go right")
             path_queue = np.append(path_queue, current_position+1)
             parent[current_position+1] = current_position
             distance[current_position+1] = distance[current_position] +1
         
         #up from the current position
         if current_position >= s.COLS and updated_field[x,y-1] != -1 and updated_field[x, y-1]!= 1 and updated_field[x,y-1]!= -1 and parent[current_position-s.COLS] == -1 and explosion_map[x,y-1] - distance[current_position] <= 0:
-            #print("go up")
             path_queue = np.append(path_queue,current_position-s.COLS)
             parent[current_position-s.COLS] = current_position
             distance[current_position-s.COLS] = distance[current_position] +1
         
- 
         #down from the current position
         if y < s.ROWS-1 and updated_field[x,y+1] != -1 and updated_field[x, y+1]!= 1 and updated_field[x,y+1] != -1 and parent[current_position+s.COLS] == -1 and explosion_map[x,y+1] - distance[current_position] <= 0:
-            #print("go down")
             path_queue = np.append(path_queue,current_position+s.COLS)
             parent[current_position+s.COLS] = current_position
             distance[current_position+s.COLS] = distance[current_position] +1
 
         counter = counter + 1
 
-        #print("---------")
-
-    #print("DANGER")
+    #no safe path found
     return True
        
       

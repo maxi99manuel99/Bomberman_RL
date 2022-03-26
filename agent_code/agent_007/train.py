@@ -1,7 +1,5 @@
 from collections import namedtuple, deque
-from hashlib import new
 from pyexpat import features
-from attr import field
 import numpy as np
 
 import pickle
@@ -28,7 +26,7 @@ Transition = namedtuple('Transition',
 EpisodeTransition = namedtuple('EpisodeTransition',
                         ('state', 'action', 'next_state', 'reward', 'timestep'))                    
 
-# Hyper parameters -- DO modify
+# Hyper parameters
 GAMMA = 0.1 # discount factor
 N = 2 # number of timesteps to look into the future for n_step td
 
@@ -37,9 +35,6 @@ BATCH_SIZE = 7000 # subset of the transitions used for gradient update
 BATCH_PRIORITY_SIZE = 100 #sample the batch with the biggest squared loss
 
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
-
-# Events
-PLACEHOLDER_EVENT = "PLACEHOLDER"
 
 
 def setup_training(self):
@@ -54,8 +49,9 @@ def setup_training(self):
     #save total rewards for each game
     self.total_rewards = 0
 
-    # Example: Setup an array that will note transition tuples
-    # (s, a, r, s')
+    #array that will note all transition tuples
+    #as well as one for transitions only of the current episode
+    #and one for rewards of each step in an episodd and the next step following the previous one
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
     self.episode_transitions = deque(maxlen=s.MAX_STEPS)
     self.episode_reward_vector = deque(maxlen=s.MAX_STEPS)
@@ -118,7 +114,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     step_reward = reward_from_events(self, events)
     self.total_rewards = self.total_rewards + step_reward
 
-    #append last transition (does not work for temporal difference since we needa next step)
+    #append last transition
     self.episode_transitions.append(EpisodeTransition(state_to_features(self,last_game_state), last_action, None, step_reward, last_game_state['step']))
     self.episode_reward_vector.append(step_reward)
     self.episode_next_states.append(None)
@@ -201,11 +197,9 @@ def reward_from_events(self, events: List[str]) -> int:
     reward_sum = 0
     for event in events:
         if event in game_rewards:
-            #print(events)
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
 
-    #print(reward_sum)
     return reward_sum
 
 def append_custom_events(self,old_game_state: dict, new_game_state: dict, events: List[str]) -> List[str]:
@@ -265,12 +259,12 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
         #->bomb
         elif (danger_left == 1 and e.MOVED_LEFT in events) or (danger_right == 1 and e.MOVED_RIGHT in events) or (danger_up == 1 and e.MOVED_UP in events) or (danger_down == 1 and e.MOVED_DOWN in events) or (danger_wait == 1 and e.WAITED in events):
             events.append("DEADLY_MOVE")
-        #->eyplosion
+        #->explosion
         elif (explosion_left == 1 and e.MOVED_LEFT in events) or (explosion_right == 1 and e.MOVED_RIGHT in events) or (explosion_up== 1 and e.MOVED_UP in events) or (explosion_down== 1 and e.MOVED_DOWN in events):
             events.append("DEADLY_MOVE")
 
         #check if move towards a target
-        #->coin and crate
+        #->coin and crate as well as opponent
         elif (target_left == 1 and e.MOVED_LEFT in events) or ( target_right == 1 and e.MOVED_RIGHT in events) or ( target_up == 1 and e.MOVED_UP in events) or ( target_down and e.MOVED_DOWN in events):
             events.append("MOVES_TOWARD_TARGET")
         else:
@@ -279,12 +273,10 @@ def append_custom_events(self,old_game_state: dict, new_game_state: dict, events
     return events
 
 #Methods for the current guess of the Q-function
-
 #TD
 def temporal_difference(self, reward, next_state):
     y = reward
     if next_state is not None:
-        #y = y + GAMMA * np.matmul(next_state, self.weights.T).max()
         Q =  [self.regression_forests[action_idx_to_test].predict([next_state]) for action_idx_to_test in range(len(ACTIONS))]
         y = y + GAMMA * np.max(Q)
 
@@ -303,7 +295,6 @@ def n_step_td(self, episode_rewards, timestep, episode_next_steps):
 
 def monte_carlo(self, episode_rewards, timestep):
     y = 0
-    #print("monte carlo episode rewards", episode_rewards)
     for i, t in enumerate(range(timestep-1, len(episode_rewards))):
         y = y + np.power(GAMMA, i) * episode_rewards[t]
 
