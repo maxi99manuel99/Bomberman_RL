@@ -162,7 +162,7 @@ def state_to_features(self, game_state: dict) -> np.array:
     #the next feature is gonna show if a bomb action is possible
     features[18] = int(own_bomb)
 
-    coin_weight = coin_distance * 1.5
+    coin_weight = coin_distance
     crate_weight = crate_distance * 4
     opponent_weight = opponent_distance 
     
